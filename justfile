@@ -56,6 +56,14 @@ seed-check SEED="42":
     uv run python -m crossfoot.generate --seed {{SEED}} --kind full --out data/.seedcheck
     uv run python -m crossfoot.generate.hashes data/full data/.seedcheck
 
+# Generate an independent eval slice into data/<NAME> (spec 01 §8.1)
+slice SEED NAME:
+    uv run python -m crossfoot.generate --seed {{SEED}} --kind slice --out data/{{NAME}}
+
+# Regenerate the committed dev slice. Needs a message when it changes (spec 01 §8.3)
+golden MSG="":
+    $env:CROSSFOOT_REGEN_GOLDEN = "1"; uv run python -m crossfoot.generate.golden {{MSG}}
+
 # Assert the ground-truth invariants over a dataset directory
 validate DIR="data/full":
     uv run python -m crossfoot.generate.validate {{DIR}}

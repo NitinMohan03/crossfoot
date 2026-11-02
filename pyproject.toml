@@ -7,6 +7,14 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "rapidfuzz>=3.10",
+    # Generator only: remittance PDFs, in invariant mode so the bytes are stable (spec 01 §9).
+    # Pinned exactly, and `test_remit.py` asserts the pin. `tests/fixtures/golden/dev/` commits
+    # ~480 PDFs whose bytes are ground truth; reportlab writes its own version into the `%PDF`
+    # header banner, which no public API overrides, so an upgrade shifts every byte offset in
+    # every one of those files. Measured 4.2.5 vs 5.1.0: the object bodies are identical once
+    # `/Producer` and `/Creator` are set by us -- only that banner and the xref offsets move.
+    # An upgrade is therefore a deliberate golden regeneration, not a transitive resolution.
+    "reportlab==5.1.0",
     # Windows ships no tz database; zoneinfo needs this for Europe/London (bank sidecar).
     "tzdata>=2024.1",
 ]
@@ -35,6 +43,11 @@ strict = true
 python_version = "3.12"
 mypy_path = "src"
 packages = ["crossfoot"]
+
+# reportlab ships no type information.
+[[tool.mypy.overrides]]
+module = ["reportlab.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

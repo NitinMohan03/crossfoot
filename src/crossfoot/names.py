@@ -5,7 +5,10 @@ matcher uses it before any fuzzy comparison.
 """
 
 import re
+from collections.abc import Iterable
 from typing import Final
+
+from rapidfuzz import fuzz
 
 LEGAL_SUFFIXES: Final = (
     "LIMITED",
@@ -33,6 +36,53 @@ def normalise(name: str) -> str:
     if len(tokens) > 1 and tokens[-1] == "AND":
         tokens.pop()
     return " ".join(tokens)
+
+
+def similarity(left: str, right: str) -> int:
+    """RapidFuzz `token_set_ratio` over normalised names, 0-100 (spec 01 §4 `NAME_SIM_MIN`).
+
+    Rounded to an integer: the generator asserts against this and the matcher decides on it, so
+    neither should be comparing a binary float to a threshold.
+    """
+    score: object = fuzz.token_set_ratio(normalise(left), normalise(right))
+    if not isinstance(score, (int, float)):
+        raise TypeError(f"token_set_ratio returned {type(score).__name__}")
+    return round(score)
+
+
+def best_similarity(candidates: Iterable[str], surface: str) -> int:
+    """The highest similarity of `surface` against any of `candidates` (legal, trading, ...)."""
+    return max((similarity(candidate, surface) for candidate in candidates), default=0)
+
+
+def token_prefixes(text: str) -> list[str]:
+    """Every leading run of whole tokens in `text`, longest first.
+
+    A bank description is one field holding a payer name and possibly a reference the payer
+    typed (`ACME WIDGETS LTD INV-2024-0891`). Nothing marks the boundary, so both the generator
+    and the matcher recover the name by trying each prefix -- which is why this lives here,
+    shared, rather than being guessed twice.
+    """
+    tokens = text.split(" ")
+    return [" ".join(tokens[:size]) for size in range(len(tokens), 0, -1)]
+
+
+def surface_similarity(candidates: Iterable[str], description: str) -> int:
+    """Best similarity of any token prefix of `description` against any of `candidates`."""
+    names = list(candidates)
+    return max(
+        (best_similarity(names, prefix) for prefix in token_prefixes(description)), default=0
+    )
+
+
+def normalises_to_any(candidates: Iterable[str], description: str) -> bool:
+    """True when some token prefix of `description` trivially normalises to some candidate."""
+    names = list(candidates)
+    return any(
+        trivially_normalises(name, prefix)
+        for prefix in token_prefixes(description)
+        for name in names
+    )
 
 
 def _drop_partial_suffix(tokens: list[str]) -> list[str]:

@@ -5,7 +5,7 @@ than Faker, whose output is version-dependent and would break byte-determinism o
 (spec 01 §2).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from importlib.resources import files
 from random import Random
@@ -23,6 +23,11 @@ FX_END: Final = date(2025, 1, 31)
 FULL_COUNTERPARTIES: Final = 300
 SLICE_COUNTERPARTIES: Final = 60
 PARENT_GROUPS_PER_300: Final = 30
+# A slice world is a fifth the size but carries >=100 of every type, so the pools the rarest
+# classes draw from cannot be left to the currency and group dice (spec 01 §8.1).
+MIN_PARENT_GROUPS: Final = 10
+FOREIGN_FLOOR_DIVISOR: Final = 30
+MIN_FOREIGN_NON_CARD: Final = 4
 
 TERMS_CHOICES: Final = (14, 30, 45, 60)
 TEMPLATES: Final = ("A", "B", "C", "D")
@@ -96,6 +101,37 @@ def _activity_weight(rank: int) -> int:
     return 10_000 // (rank + 5) + 5
 
 
+def _ensure_foreign_pool(
+    rng: Random, counterparties: list[Counterparty], floor: int
+) -> list[Counterparty]:
+    """Guarantee `floor` card-free foreign counterparties, converting the quietest if short.
+
+    `fx` is the only class a foreign counterparty may belong to, and a card product already
+    means `fee`, so the `fx` pool is exactly "foreign and card-free" (spec 01 §4.2, §4.7). At
+    the full set's 300 counterparties the 10% foreign rate clears the floor on its own and this
+    is a no-op; a 60-counterparty slice can fall short, and an empty pool would abort the run.
+    Conversions take the lowest-weight counterparties so the activity distribution barely moves,
+    and only card-free ones, so the `card` pool is untouched.
+    """
+    foreign = [cp for cp in counterparties if cp.currency != "GBP" and not cp.is_card]
+    shortfall = floor - len(foreign)
+    if shortfall <= 0:
+        return counterparties
+    candidates = sorted(
+        (cp for cp in counterparties if cp.currency == "GBP" and not cp.is_card),
+        key=lambda cp: (cp.weight, cp.id),
+    )[:shortfall]
+    converted = {cp.id for cp in candidates}
+    out: list[Counterparty] = []
+    for cp in counterparties:
+        if cp.id not in converted:
+            out.append(cp)
+            continue
+        currency = rng.choice(["USD", "EUR"])
+        out.append(replace(cp, currency=currency, country=COUNTRY_BY_CURRENCY[currency]))
+    return out
+
+
 def build_world(seed: int, kind: str = "full", counterparty_count: int | None = None) -> World:
     count = counterparty_count or (FULL_COUNTERPARTIES if kind == "full" else SLICE_COUNTERPARTIES)
     name_rng = substream(seed, "world:names")
@@ -147,7 +183,19 @@ def build_world(seed: int, kind: str = "full", counterparty_count: int | None = 
             )
         )
 
-    group_count = max(1, round(PARENT_GROUPS_PER_300 * count / FULL_COUNTERPARTIES))
+    counterparties = _ensure_foreign_pool(
+        substream(seed, "world:foreign-floor"),
+        counterparties,
+        max(MIN_FOREIGN_NON_CARD, count // FOREIGN_FLOOR_DIVISOR),
+    )
+
+    # Scale with the world but never below `MIN_PARENT_GROUPS`: `reasoning(a)` draws from group
+    # members only, and a slice still needs >=100 reasoning events. Capped by the name pool,
+    # which holds exactly `PARENT_GROUPS_PER_300` spare pairs.
+    group_count = min(
+        PARENT_GROUPS_PER_300,
+        max(MIN_PARENT_GROUPS, round(PARENT_GROUPS_PER_300 * count / FULL_COUNTERPARTIES)),
+    )
     members = [cp.id for cp in counterparties]
     parent_rng.shuffle(members)
     parents: list[ParentGroup] = []

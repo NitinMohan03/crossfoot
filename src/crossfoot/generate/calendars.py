@@ -98,3 +98,17 @@ def business_day_on_or_after(day: date) -> date:
     while not is_business_day(out):
         out += timedelta(days=1)
     return out
+
+
+def last_payable_day(window_end: date) -> date:
+    """The latest value date whose payout still lands inside the window.
+
+    A processor batch closes on the settlement date and pays out into the bank on the *next*
+    business day (spec 01 §3.3), while the bank export is a fixed set of monthly files ending
+    at `window_end` (§3.2). A payment on the window's final day would therefore pay out into a
+    month that has no file, so this is the real ceiling for any payment date.
+    """
+    out = business_day_on_or_before(window_end)
+    while next_business_day(out) > window_end:
+        out = previous_business_day(out)
+    return out

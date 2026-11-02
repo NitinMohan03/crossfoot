@@ -35,6 +35,7 @@ def build(rng: Random, ctx: EventContext) -> Event:
 
     return Event(
         index=ctx.index,
+        ordinal=ctx.ordinal,
         event_id=ctx.event_id,
         match_type="fee",
         counterparty_id=cp.id,

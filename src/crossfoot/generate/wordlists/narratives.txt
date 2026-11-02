@@ -1,0 +1,55 @@
+# Remittance-advice narrative corpus (spec 01 §3.4).
+# One template per line: <tag>|<text>. Slots are filled by crossfoot.generate.remittance:
+#   {ref} first invoice reference   {amount} the advice total, formatted
+#   {count} number of line items    {cn_ref} the credit note the payer cites
+#   {subsidiary} the ERP legal name of the counterparty the invoice was issued to
+# Tags map to a discrepancy class; `general` is drawn by any class that has no tag of its own.
+general|Payment made against the invoices listed above. Please allocate as shown.
+general|Remittance advice for {count} item(s) totalling {amount}. No action required.
+general|Settled by bank transfer. Our reference is quoted on the payment.
+general|Please confirm receipt and allocation of {amount} against {ref}.
+general|This advice supersedes any earlier schedule sent for the same period.
+general|Payment released by our accounts department on the date shown.
+general|Allocation as per the schedule. Queries to accounts payable, quoting {ref}.
+general|Funds sent by Faster Payment. Value should reach you the same working day.
+general|Monthly settlement run. Items not listed here remain outstanding.
+general|Paid in full. Our purchase order reference appears on the bank narrative.
+general|Please note our new remittance address on correspondence from next month.
+general|Payment processed under our standard terms. Nothing further is outstanding.
+general|Totals have been checked against your statement of account.
+general|Released early this period because of the bank holiday.
+general|One payment covers the items above; please do not re-present them.
+partial|First of {count} agreed instalments against {ref}. The balance follows per the schedule.
+partial|Instalment payment as agreed with your credit control team on {ref}.
+partial|Paid in two instalments at your request. Totals reconcile to {amount}.
+partial|Staged payment against {ref}. Remaining instalments are already diarised.
+partial|We are settling {ref} over several payments per the arrangement on file.
+partial|Part payment. The outstanding balance on {ref} is scheduled for next month's run.
+consolidated|Single payment covering {count} invoices. Please allocate line by line.
+consolidated|Consolidated settlement of {amount} across the invoices listed.
+consolidated|Batched payment this period; see the schedule above for allocation.
+consolidated|Paid together to reduce transfer charges. See CN where shown.
+consolidated|All open items to date are included in this payment of {amount}.
+consolidated|Our monthly consolidation run. Credit notes are netted off above.
+short_pay|Payment reduced pending resolution of the shortfall. We hold credit note {cn_ref} against {ref}.
+short_pay|We have withheld part of {ref} and offset credit note {cn_ref}, issued after your statement date.
+short_pay|Short paid against {ref}: the balance is covered by {cn_ref}, which your team has acknowledged.
+short_pay|Deduction taken per {cn_ref}. The remaining {amount} settles {ref} in full on our ledger.
+short_pay|Goods on {ref} were partly rejected on delivery; {cn_ref} covers the difference.
+short_pay|Quantity shortfall on {ref}. We have netted {cn_ref} and paid the balance of {amount}.
+short_pay|A pricing dispute on {ref} remains open. {cn_ref} has been raised and deducted here.
+short_pay|Payment net of the agreed rebate, documented in {cn_ref}, not yet on your statement.
+short_pay|We have applied {cn_ref} to {ref}. Please raise a query if it is not on your ledger.
+short_pay|Settled net of {cn_ref} following the service credit agreed by your account manager.
+rounding|Amounts rounded to the nearest penny for the payment file; a rounding adjustment is shown per line.
+rounding|Our system rounds each line before transfer, so line totals differ from your invoices by pence.
+rounding|A rounding adjustment has been applied to each line. The payment total is {amount}.
+rounding|Per-line rounding applied by our payment platform. No invoice is in dispute.
+rounding|The pence difference against your invoices is a rounding adjustment, not a deduction.
+rounding|Line amounts carry a rounding adjustment; the aggregate paid is {amount}.
+dba|Paid centrally by the group treasury on behalf of {subsidiary}.
+dba|This payment is made by the parent company for invoices issued to {subsidiary}.
+dba|Group payment run. The trading entity invoiced is {subsidiary}.
+dba|Settled from the group account. Please allocate against {subsidiary}'s account.
+dba|Our shared service centre pays all invoices addressed to {subsidiary}.
+dba|Payment on behalf of {subsidiary}, whose payables we administer centrally.

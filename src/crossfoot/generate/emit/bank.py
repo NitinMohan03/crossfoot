@@ -11,17 +11,14 @@ from pathlib import Path
 from typing import Final
 from zoneinfo import ZoneInfo
 
-from crossfoot.generate.emit.refs import reference_fragment
+from crossfoot.generate.emit.refs import description_for
 from crossfoot.generate.records import Event, NoiseRecord, PaymentLeg
 from crossfoot.generate.rng import substream
-from crossfoot.generate.types.common import DESCRIPTION_MAX, truncate_words
 from crossfoot.money import format_minor
-from crossfoot.names import trivially_normalises
 
 LONDON: Final = ZoneInfo("Europe/London")
 OPENING_BALANCE_MINOR: Final = 1_250_000
 HEADER: Final = "Transaction Date,Transaction Type,Description,Paid Out,Paid In,Balance"
-NAME_FLOOR: Final = 12
 
 
 @dataclass(slots=True)
@@ -42,23 +39,22 @@ class BankPlan:
         return [row for month in self.months for row in self.rows[month]]
 
 
-def description_for(leg: PaymentLeg, invoice_ref: str | None) -> str:
-    """Payer name, plus whatever reference the payer typed, as a bank would truncate it."""
-    name = " ".join(leg.payer_surface.upper().split())
-    fragment = reference_fragment(leg, invoice_ref) if invoice_ref else None
-    if not fragment:
-        return truncate_words(name, DESCRIPTION_MAX)[:DESCRIPTION_MAX]
-    budget = DESCRIPTION_MAX - len(fragment) - 1
-    short = truncate_words(name, budget)
-    if budget < NAME_FLOOR or not trivially_normalises(leg.payer_surface, short):
-        # The reference would cost the payer name its identity; a real export would still
-        # carry the name, so drop the reference instead (spec 01 §4.1).
-        return truncate_words(name, DESCRIPTION_MAX)[:DESCRIPTION_MAX]
-    return f"{short} {fragment}"[:DESCRIPTION_MAX]
-
-
 def _month_key(day: date) -> str:
     return f"{day.year:04d}-{day.month:02d}"
+
+
+def _bucket(collected: dict[str, list[BankRow]], day: date, what: str) -> list[BankRow]:
+    """The month file a row belongs in.
+
+    The export is a fixed set of monthly files (spec 01 §3.2), so a row dated outside them is a
+    bug in whatever chose the date -- `calendars.last_payable_day` is the ceiling. Say so,
+    rather than raising a bare KeyError from a dict lookup.
+    """
+    key = _month_key(day)
+    rows = collected.get(key)
+    if rows is None:
+        raise AssertionError(f"{what} dated {day} falls outside the bank export months")
+    return rows
 
 
 def month_range(start: date, end: date) -> list[str]:
@@ -75,13 +71,18 @@ def plan(seed: int, events: list[Event], payouts: list[NoiseRecord], months: lis
     collected: dict[str, list[BankRow]] = {month: [] for month in months}
 
     for event in events:
-        for leg in event.legs:
+        # Duplicates are real rows in the export; they just belong to their own group (§4.9).
+        for leg in event.all_legs:
             if leg.kind != "bank":
                 continue
-            invoice = event.invoices[leg.invoice_index]
-            row = BankRow(leg=leg, description=description_for(leg, invoice.ref))
+            # An `unknown_receipt` orphan has no invoice at all, so there is no reference for
+            # the payer to have quoted (spec 01 §4.10).
+            invoice = event.invoice_for(leg)
+            row = BankRow(
+                leg=leg, description=description_for(leg, invoice.ref if invoice else None)
+            )
             row.paid_in_minor = leg.amount_minor
-            collected[_month_key(leg.value_date)].append(row)
+            _bucket(collected, leg.value_date, f"{event.event_id} payment").append(row)
 
     for noise in payouts:
         row = BankRow(leg=noise.leg, description=description_for(noise.leg, None))
@@ -89,7 +90,7 @@ def plan(seed: int, events: list[Event], payouts: list[NoiseRecord], months: lis
             row.paid_out_minor = noise.leg.amount_minor
         else:
             row.paid_in_minor = noise.leg.amount_minor
-        collected[_month_key(noise.leg.value_date)].append(row)
+        _bucket(collected, noise.leg.value_date, f"{noise.kind} line").append(row)
 
     balance = OPENING_BALANCE_MINOR
     ordered: dict[str, list[BankRow]] = {}

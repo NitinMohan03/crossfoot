@@ -216,6 +216,35 @@ def read_bank(directory: Path) -> list[BankLine]:
     return lines
 
 
+def read_fx(path: Path) -> dict[date, dict[str, int]]:
+    """`fx_rates.csv` back into parts per million, so the validator can redo the conversions.
+
+    Parsed as integers, never through a float: `1.270000` -> `1_270_000` ppm (spec 01 §3.5).
+    """
+    rows = path.read_text(encoding="utf-8").splitlines()
+    if not rows:
+        raise ValueError(f"{path} is empty")
+    codes = rows[0].split(",")[1:]
+    table: dict[date, dict[str, int]] = {}
+    for row in rows[1:]:
+        if not row:
+            continue
+        fields = row.split(",")
+        table[date.fromisoformat(fields[0])] = {
+            code: parse_minor(value, 6) for code, value in zip(codes, fields[1:], strict=True)
+        }
+    return table
+
+
+def read_remit(directory: Path) -> list[dict[str, Any]]:
+    return read_jsonl(directory / "remit.jsonl")
+
+
+def pdf_names(directory: Path) -> set[str]:
+    """The `<payment_ref>` of every PDF actually on disk."""
+    return {path.stem for path in directory.glob("*.pdf")}
+
+
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []

@@ -39,8 +39,10 @@ def event_group(event: Event) -> dict[str, Any]:
             [invoice.record_id for invoice in event.invoices]
             + [note.record_id for note in event.credit_notes]
         ),
+        # Only the canonical payment records. A duplicated copy is a real record but its own
+        # group, or every duplicate event would be an unmatchable two-target group (§4.9).
         "target_ids": sorted(leg.record_id for leg in event.legs),
-        "evidence_ids": [],
+        "evidence_ids": [] if event.remittance is None else [event.remittance.id],
         "payment_method": event.payment_method,
         "paid_on": event.paid_on.isoformat(),
         "decoys": sorted(event.decoys),
@@ -48,7 +50,30 @@ def event_group(event: Event) -> dict[str, Any]:
     }
     if event.reasoning_subtype:
         group["reasoning_subtype"] = event.reasoning_subtype
+    if event.no_match_kind:
+        group["kind"] = event.no_match_kind
     return group
+
+
+def duplicate_groups(event: Event) -> list[dict[str, Any]]:
+    """One singleton group per re-exported copy (spec 01 §4.9, §5.1).
+
+    An empty source side is deliberate: a copy corresponds to no commercial fact, so the right
+    answer is "this matches nothing, and here is what it duplicates".
+    """
+    canonical = event.legs[0].record_id if event.legs else ""
+    return [
+        {
+            "event_id": None,
+            "match_type": "duplicate",
+            "duplicate_of": canonical,
+            "source_ids": [],
+            "target_ids": [leg.record_id],
+            "evidence_ids": [],
+            "notes": None,
+        }
+        for leg in event.duplicate_legs
+    ]
 
 
 def noise_group(noise: NoiseRecord) -> dict[str, Any]:
@@ -65,6 +90,8 @@ def noise_group(noise: NoiseRecord) -> dict[str, Any]:
 
 def build_groups(events: Sequence[Event], noise: Sequence[NoiseRecord]) -> list[dict[str, Any]]:
     groups = [event_group(event) for event in events]
+    for event in events:
+        groups += duplicate_groups(event)
     groups += [noise_group(item) for item in noise]
     for group in groups:
         missing = [record_id for record_id in group["target_ids"] if not record_id]
@@ -80,9 +107,15 @@ def build_header(
     kind: str,
     event_count: int,
     type_counts: dict[MatchType, int],
+    events: Sequence[Event],
     noise: Sequence[NoiseRecord],
 ) -> dict[str, Any]:
+    # All four `no_match` kinds in one dict (spec 01 §5.2): the two event orphans, which count
+    # toward the 1% quota, plus the two noise kinds, which sit outside it.
     kinds: dict[str, int] = {}
+    for event in events:
+        if event.no_match_kind:
+            kinds[event.no_match_kind] = kinds.get(event.no_match_kind, 0) + 1
     for item in noise:
         kinds[item.kind] = kinds.get(item.kind, 0) + 1
     return {
