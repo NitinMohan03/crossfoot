@@ -2,8 +2,9 @@
 
 Denies:
   1. any write under tests/fixtures/golden/  (ground truth)
-  2. `float(` under src/crossfoot/{matching,blocking,models}/  (money is Decimal)
-  3. `import anthropic` / `from anthropic` outside src/crossfoot/llm/  (all API calls go through llm/)
+  2. `float(` under src/crossfoot/{matching,blocking,models,generate}/  (money is Decimal)
+  3. `import anthropic` / `from anthropic` outside src/crossfoot/llm/
+     (all API calls go through llm/)
 """
 
 import json
@@ -12,7 +13,12 @@ import re
 import sys
 
 GOLDEN = "tests/fixtures/golden/"
-NO_FLOAT = ("src/crossfoot/matching/", "src/crossfoot/blocking/", "src/crossfoot/models/")
+NO_FLOAT = (
+    "src/crossfoot/matching/",
+    "src/crossfoot/blocking/",
+    "src/crossfoot/models/",
+    "src/crossfoot/generate/",
+)
 LLM_ONLY = "src/crossfoot/llm/"
 ANTHROPIC_IMPORT = re.compile(r"^\s*(import\s+anthropic\b|from\s+anthropic\b)", re.MULTILINE)
 
@@ -46,7 +52,8 @@ def main() -> None:
     if rel.startswith(NO_FLOAT) and "float(" in content:
         deny(f"{rel}: `float(` is banned here. Money is Decimal or integer minor units.")
 
-    if rel.startswith("src/crossfoot/") and not rel.startswith(LLM_ONLY) and ANTHROPIC_IMPORT.search(content):
+    outside_llm = rel.startswith("src/crossfoot/") and not rel.startswith(LLM_ONLY)
+    if outside_llm and ANTHROPIC_IMPORT.search(content):
         deny(f"{rel}: anthropic may only be imported under src/crossfoot/llm/.")
 
 

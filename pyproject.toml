@@ -5,7 +5,11 @@ description = "Multi-source financial reconciliation: deterministic rules first,
 readme = "README.md"
 # <3.13: torch / sentence-transformers wheels lag; system Python is 3.14 and must not be picked up.
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "rapidfuzz>=3.10",
+    # Windows ships no tz database; zoneinfo needs this for Europe/London (bank sidecar).
+    "tzdata>=2024.1",
+]
 
 [dependency-groups]
 dev = [

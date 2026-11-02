@@ -5,7 +5,14 @@ description: Ground-truth manifest format, discrepancy-type labels and target ra
 
 # Fixture conventions
 
-Authoritative spec once written: `specs/01-data-generation.md` (Session 1.1). Until then, this file holds what the plan fixes.
+The authoritative spec is `specs/01-data-generation.md`. **Read it before changing anything under
+`src/crossfoot/generate/`** -- it supersedes this file wherever the two disagree. What follows is the
+quick reference.
+
+Implementation status: Session 1.2 built `clean`, `fee` and `timing` plus the ERP/bank/processor
+writers, the manifest and `just seed` / `seed-check` / `validate`. The other seven types, the decoy
+set, the remittance PDFs and the slice/golden machinery are Session 1.3, and
+`crossfoot.generate.validate.PENDING` lists the checks still stubbed out.
 
 ## Vocabulary
 - **Event** — one commercial fact (Acme pays invoice 0891).

@@ -278,9 +278,9 @@ Decoys are applied to `clean`, `timing` and `name` events only, so they never co
 
 | Kind | Command | Events | Type quotas | Location | Committed |
 |---|---|---|---|---|---|
-| full | `just seed SEED=42` | 10,000 | natural rates (§4) | `data/full/` | no (gitignored) |
-| dev slice | `just slice SEED=$DEV_SEED NAME=dev` | 1,200 | floor 100 per type + 200 at natural rate | `tests/fixtures/golden/dev/` via `just golden` | yes |
-| test slice | `just slice SEED=$TEST_SEED NAME=test` | 1,200 | same rule | `data/test/` | no — **not generated until Phase 8** |
+| full | `just seed 42` | 10,000 | natural rates (§4) | `data/full/` | no (gitignored) |
+| dev slice | `just slice $DEV_SEED dev` | 1,200 | floor 100 per type + 200 at natural rate | `tests/fixtures/golden/dev/` via `just golden` | yes |
+| test slice | `just slice $TEST_SEED test` | 1,200 | same rule | `data/test/` | no — **not generated until Phase 8** |
 
 Slice quotas (floor 100 + 200 × natural rate): clean 214, fee 120, timing 116, name 114, partial 110, consolidated 108, fx 106, reasoning 106 (36/35/35 by sub-type), duplicate 104, no_match 102 (51/51). Clean remains the plurality so slice-level aggregates resemble the full set; per-type numbers are the headline anyway.
 
@@ -288,11 +288,11 @@ Slices are **independent worlds**: the generator runs end to end with the slice'
 
 ### 8.2 Seeds
 
-`src/crossfoot/generate/seeds.py` holds `DEV_SEED` and `TEST_SEED` as constants **[decided]**. `just slice SEED=$TEST_SEED` and `just eval-test` refuse to run unless `CROSSFOOT_ALLOW_TEST=1`. Nothing else in the repo reads `TEST_SEED`.
+`src/crossfoot/generate/seeds.py` holds `DEV_SEED` and `TEST_SEED` as constants **[decided]**. `just slice $TEST_SEED` and `just eval-test` refuse to run unless `CROSSFOOT_ALLOW_TEST=1`. Nothing else in the repo reads `TEST_SEED`.
 
 ### 8.3 Golden gate
 
-`tests/fixtures/golden/` is ground truth. The Write/Edit hook already blocks tool writes. The generator itself refuses to write under that path unless `CROSSFOOT_REGEN_GOLDEN=1`. `just golden` sets the flag, regenerates `golden/dev/`, prints `git diff --stat`, and exits non-zero if the tree is dirty and no `MSG=` commit message was supplied — a regeneration is always a deliberate, reviewed commit.
+`tests/fixtures/golden/` is ground truth. The Write/Edit hook already blocks tool writes. The generator itself refuses to write under that path unless `CROSSFOOT_REGEN_GOLDEN=1`. `just golden` sets the flag, regenerates `golden/dev/`, prints `git diff --stat`, and exits non-zero if the tree is dirty and no commit message was supplied — a regeneration is always a deliberate, reviewed commit.
 
 ---
 
@@ -303,13 +303,13 @@ Slices are **independent worlds**: the generator runs end to end with the slice'
 - All ids derive from `(seed, index)`; no `uuid4`, no wall clock, no `datetime.now()`.
 - Every output file is written in a fixed order (sorted keys, sorted ids, `\n` or CRLF as specified, no trailing whitespace). JSON is written with `sort_keys=True, separators=(",", ":")`.
 - PDFs: reportlab `invariant=1`, no `/ID`, no `/CreationDate` drift, built-in Type 1 fonts only.
-- Verification: `just seed SEED=42` twice → `just seed-check` compares a SHA-256 over every file under `data/full/` and fails on any difference.
+- Verification: `just seed 42` twice → `just seed-check` compares a SHA-256 over every file under `data/full/` and fails on any difference.
 
 ---
 
 ## 10. Validator — `crossfoot.generate.validate`
 
-`just validate PATH=data/full` runs on any dataset directory and asserts, printing a per-type table:
+`just validate data/full` runs on any dataset directory and asserts, printing a per-type table:
 
 1. **Counts** — `type_counts` in the header equal the header's declared quotas exactly; `no_match` broken down by `kind`; reasoning by sub-type; slices ≥100 per type.
 2. **Referential integrity** — every id in every source file appears in exactly one group; every id in the manifest exists in a source file; `duplicate_of` targets exist and are not themselves duplicates.
@@ -324,6 +324,10 @@ The Session 1.3 verification is this script's output over `data/full` and over t
 ---
 
 ## 11. Package layout and recipes
+
+> Command form corrected in Session 1.2: `just` takes recipe arguments positionally, so the
+> recipes are `just seed 42`, `just seed-check 42`, `just validate data/full` (each argument
+> has a default), not the `NAME=value` shorthand written above.
 
 ```
 src/crossfoot/generate/

@@ -19,3 +19,6 @@ dist/
 # IDE
 .idea/
 .vscode/
+
+# Generated datasets
+data/

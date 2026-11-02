@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Ground truth is compared byte for byte. The bank CSVs are CRLF by spec (01 §3.2), so git
+# must not normalise anything under the golden tree or CI (Linux) would see LF and fail.
+tests/fixtures/golden/** -text
