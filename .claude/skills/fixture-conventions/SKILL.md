@@ -9,10 +9,18 @@ The authoritative spec is `specs/01-data-generation.md`. **Read it before changi
 `src/crossfoot/generate/`** -- it supersedes this file wherever the two disagree. What follows is the
 quick reference.
 
-Implementation status: Session 1.2 built `clean`, `fee` and `timing` plus the ERP/bank/processor
-writers, the manifest and `just seed` / `seed-check` / `validate`. The other seven types, the decoy
-set, the remittance PDFs and the slice/golden machinery are Session 1.3, and
-`crossfoot.generate.validate.PENDING` lists the checks still stubbed out.
+Implementation status: **Phase 1 is complete.** All ten discrepancy types, the §7 decoys, the four
+remittance layouts (D held out), the slice/golden machinery and every §10 validator check are built;
+`crossfoot.generate.validate.PENDING` is empty. Recipes: `just seed 42`, `just seed-check 42`,
+`just validate [dir]`, `just slice <seed> <name>`, `just golden "<reason>"`.
+
+Four places where spec 01 contradicted itself were resolved in Session 1.3 and are recorded as
+block quotes in the spec at §4.5, §4.6, §4.7, §4.8(b), §6.4 and §9. The short version: short-pay is
+10.5–40% (not 5–40%, which would land inside `FEE_WINDOW`); batches are keyed by
+(settlement date, currency) so a foreign batch can pay out in GBP; a consolidated group's source
+side never exceeds 4 ids; and the §10.6 PDF-rate tolerance is measured against the pooled
+non-mandatory rate, not the 40% global one. `reportlab` is pinned exactly because the committed
+golden PDFs are bytes.
 
 ## Vocabulary
 - **Event** — one commercial fact (Acme pays invoice 0891).

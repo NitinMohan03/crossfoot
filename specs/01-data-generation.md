@@ -149,13 +149,40 @@ Payer name on the payment side is drifted beyond trivial normalisation but still
 
 ### 4.5 `partial` — 5%
 
+> **Session 1.3:** the instalment gaps are drawn *before* the invoice, so its issue date can
+> reserve exactly the room the schedule needs. Choosing the invoice first and clamping
+> instalments to the end of the payment window puts two instalments on the same day, and
+> snapping a 45-day gap forward onto a business day overshoots the 45-day bound; both are
+> caught by §10.4. A consequence: a counterparty on 60-day terms drawing three long gaps can
+> only be invoiced in the first half of the year, so `partial` issue dates skew earlier than
+> other classes'. The spec constrains the gaps, not the issue-date distribution.
+
+
 One invoice, N ∈ {2, 3, 4} payment records summing **exactly** to `base_amount_minor`, spread 1–45 days apart, allowed to cross a month end. Always has a remittance PDF listing the instalments. Manifest: `source_ids=[erp:INV]`, `target_ids=[N payment records]`.
 
 ### 4.6 `consolidated` — 4%
 
 One payment record covering N ∈ {2, 3, 4} invoices from the same counterparty, optionally (40%) less one credit note issued before `paid_on`. Sum is exact: `payment = Σ invoices − CN`. Always has a remittance PDF listing every component. Manifest: `source_ids=[erp:INV…, erp:CN?]`, `target_ids=[payment]`. N = 4 is the group-size cap; nothing in this class exceeds it.
 
+> **Session 1.3:** the two bounds above conflict — four invoices *plus* a credit note is five
+> source ids. Resolved in favour of the cap: the **source side never exceeds 4 ids**, so N is
+> 2–4 invoices on its own and 2–3 when the credit-note variant fires. Downstream candidate
+> budgets can rely on the cap. Also: a consolidated group's invoices are clustered within one
+> period (≤30 days, and never more than the terms allow), because a payment that is on time for
+> the earliest due date must not predate the latest invoice it settles.
+
+
 ### 4.7 `fx` — 3%
+
+> **Session 1.3:** §4.7 settles processor-paid foreign events in USD/EUR, while §3.3 pays each
+> batch out as one bank `TFR` line equal to `total_net_minor` — but the bank is a GBP account,
+> so a foreign batch cannot satisfy both. Resolved by batching on **(settled_on, currency)**:
+> a batch record gains `currency` and `payout_base_minor`, and the `TFR` line carries
+> `payout_base_minor` = `total_net_minor` converted at the **payout-date** rate (equal to
+> `total_net_minor` for GBP). The validator checks `total_net_minor = Σ net_minor` for every
+> batch and the conversion for foreign ones. Settlement lines also gain `fx_rate` /
+> `fx_rate_date` (null for GBP), which is where §4.7's "settlement-date rate recorded" lives.
+
 
 Counterparty currency is USD or EUR. ERP stores the foreign amount and `base_amount_minor` at the **invoice-date** rate. Bank receives GBP converted at the **value-date** rate. Processor settles in the foreign currency with the **settlement-date** rate recorded. The residual is bounded by the walk over ≤5 days. The FX table is available to the matcher; this class is rules-solvable. Foreign currency implies `fx` — acceptable for the same reason as §4.2.
 
@@ -165,6 +192,15 @@ Constructed to be unsolvable by fuzzy match or arithmetic, and **asserted** afte
 
 - **(a) parent / subsidiary / DBA** — invoice issued to a subsidiary (`Google UK Ltd`), payer is the parent or DBA (`Alphabet Inc`) from the hidden registry. Assert `token_set_ratio < NAME_SIM_MIN` against both legal and trading name. Amount and dates clean. A remittance PDF, when present (40%), names the subsidiary in the narrative only.
 - **(b) short-pay with narrative** — payment = gross − X, X in 5–40% of gross (outside `FEE_WINDOW`), remittance narrative says why and cites a credit note (`CN-2025-…`) that **does not exist in the dataset** (issued after the window). Only the PDF narrative resolves it. Assert `net/gross ∉ FEE_WINDOW`.
+
+> **Session 1.3:** "5–40%" and `net/gross ∉ FEE_WINDOW` cannot both hold. `FEE_WINDOW` is
+> `(0.90, 1.02)`, so a 5% short-pay gives 0.95 — inside the window, i.e. indistinguishable from
+> a processor fee. The **assertion wins**, since being outside the fee window is the reason the
+> class exists: X is drawn from **1050–4000 bp (10.5–40%)**, giving `net/gross ≤ 0.895`.
+> Implemented as `types/reasoning.SHORT_PAY_BP`.
+> The cited `CN-2025-*` is kept non-existent by clamping every generated credit note's
+> `issued_on` to the invoice window (§4.6), which the validator asserts.
+
 - **(c) consolidated with rounding residual** — as §4.6 but the payment differs from the exact sum by 1–5p, and the PDF's per-line amounts differ from ERP by the same pennies with a "rounding adjustment" note. Assert `0 < |residual| ≤ 5` minor units. Below any fee window, above `EXACT_SUM_TOL`; no rule the matcher is told about closes the gap.
 
 Manifest carries `reasoning_subtype ∈ {dba, short_pay, rounding}`.
@@ -255,6 +291,22 @@ Four templates, chosen per counterparty (a payer always uses the same template) 
 
 `partial`, `consolidated`, `reasoning(b)`, `reasoning(c)` always have a PDF. To keep overall PDF rate at ~40% and `has_pdf` uninformative for the other types, the generator gives `clean`/`fee`/`timing`/`name`/`fx`/`reasoning(a)` events a PDF at the rate that brings the total to 40% (~33% of those events). The validator asserts the per-type PDF rate is within ±3 pp for the non-mandatory types.
 
+> **Session 1.3:** §10.6 words this as "±3 pp of the **global** rate", which is unsatisfiable —
+> the global rate is 40% while the non-mandatory types sit at 33.7% by this section's own
+> arithmetic, 6.3 pp away. The reference is the **pooled non-mandatory rate**, the only reading
+> under which `has_pdf` is uninformative *between* those types. The top-up rate is derived from
+> the natural rate table as `(40 − 11)/86 = 29/86`, not from the dataset in hand, so each
+> bucket's count depends only on its own size and §9's per-type isolation holds. Measured at
+> seed 42: every bucket within 0.3 pp of the pooled 33.7%, global 40.0%.
+> `duplicate` and `no_match` carry no advice — an `unknown_receipt` with a remittance advice
+> would not be unknown.
+>
+> The ~40% *global* figure holds for the full set (measured 40.0%) but not for a slice, which
+> is 43.7% at `DEV_SEED`: the floor of 100 per type over-weights the always-advised classes
+> relative to `clean`. The invariant that matters — the pooled non-mandatory rate, 33.5% on the
+> slice — holds in both, and that is what §10.6 asserts.
+
+
 ---
 
 ## 7. Decoys (hard negatives)
@@ -302,7 +354,19 @@ Slices are **independent worlds**: the generator runs end to end with the slice'
 - Changing the generator for one type must not change any other type's records for the same seed. A test pins the dev-slice hashes per source file and per type.
 - All ids derive from `(seed, index)`; no `uuid4`, no wall clock, no `datetime.now()`.
 - Every output file is written in a fixed order (sorted keys, sorted ids, `\n` or CRLF as specified, no trailing whitespace). JSON is written with `sort_keys=True, separators=(",", ":")`.
-- PDFs: reportlab `invariant=1`, no `/ID`, no `/CreationDate` drift, built-in Type 1 fonts only.
+- PDFs: reportlab `invariant=1`, no `/CreationDate` drift, built-in Type 1 fonts only.
+
+> **Session 1.3, measured not assumed:** `invariant` does **not** omit `/ID`; it derives the
+> array from a digest of the document content, so it is stable for the same input. Two runs in
+> separate processes then agree byte for byte.
+> `/Producer` and `/Creator` default to version-dependent strings and are overridden with our
+> own. What remains version-dependent is reportlab's `%PDF` header banner comment, which no
+> public API controls: measured across 4.2.5 and 5.1.0 the object bodies are **identical**, and
+> only that banner (12 bytes) and the xref offsets it shifts differ. Since
+> `tests/fixtures/golden/dev/` commits ~480 advices as bytes, **reportlab is pinned exactly**
+> in `pyproject.toml` and `test_remit.py` asserts the pin, so an upgrade is a deliberate golden
+> regeneration rather than a transitive resolution.
+
 - Verification: `just seed 42` twice → `just seed-check` compares a SHA-256 over every file under `data/full/` and fails on any difference.
 
 ---
