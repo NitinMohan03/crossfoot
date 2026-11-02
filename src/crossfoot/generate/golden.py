@@ -16,6 +16,8 @@ The dev seed comes from `seeds.py`; it is never written into the justfile. `TEST
 path into this module at all -- the test slice is held out until Phase 8 (§8.2).
 """
 
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +29,8 @@ from crossfoot.generate.guards import GOLDEN, GuardError, require_golden_opt_in
 from crossfoot.generate.seeds import DEV_SEED
 
 DEV_DIR: Final = GOLDEN / "dev"
+MANIFEST: Final = DEV_DIR / "manifest.jsonl"
+SHA_ENV: Final = "CROSSFOOT_GENERATOR_SHA"
 
 
 def git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -39,6 +43,41 @@ def tree_is_dirty(path: Path) -> bool:
     return bool(result.stdout.strip())
 
 
+def head_sha() -> str:
+    result = git("rev-parse", "HEAD")
+    return result.stdout.strip() if result.returncode == 0 else "unknown"
+
+
+def committed_sha() -> str | None:
+    """The `generator_sha` recorded in the golden manifest as committed, if there is one.
+
+    The manifest header carries the commit the dataset was generated from (spec 01 §5.2), and
+    for a *committed* fixture that field is a trap: committing the slice moves HEAD, so the
+    next regeneration would differ from it by that one value and the gate below would report a
+    change on every run, for ever, never reaching "unchanged".
+
+    So a regeneration is produced with the sha already on record, which makes a no-op
+    regeneration byte-identical. Only when the content genuinely moves is the sha rewritten to
+    the current HEAD -- giving it the meaning that is actually useful: *the commit at which this
+    fixture's content last changed*, not the commit that happens to be checked out now.
+    """
+    result = git("show", f"HEAD:{MANIFEST.as_posix()}")
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    header = json.loads(result.stdout.splitlines()[0])
+    sha = header.get("generator_sha")
+    return str(sha) if sha else None
+
+
+def regenerate(sha: str) -> tuple[int, str]:
+    """Write the slice with `sha` as its recorded provenance. Returns (events, type summary)."""
+    os.environ[SHA_ENV] = sha
+    dataset = generate(DEV_SEED, "slice", SLICE_EVENTS)
+    write(DEV_DIR, dataset)
+    counts = ", ".join(f"{name}={value}" for name, value in sorted(dataset.type_counts.items()))
+    return len(dataset.events), counts
+
+
 def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     message = " ".join(args).strip()
@@ -49,10 +88,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
-    dataset = generate(DEV_SEED, "slice", SLICE_EVENTS)
-    write(DEV_DIR, dataset)
-    counts = ", ".join(f"{name}={value}" for name, value in sorted(dataset.type_counts.items()))
-    print(f"regenerated {DEV_DIR}: seed={DEV_SEED} events={len(dataset.events)}")
+    pinned = committed_sha()
+    events, counts = regenerate(pinned or head_sha())
+    print(f"regenerated {DEV_DIR}: seed={DEV_SEED} events={events}")
     print(f"  types: {counts}\n")
 
     results = validate.run(DEV_DIR)
@@ -81,6 +119,12 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+
+    # The content genuinely moved, so the provenance should name this regeneration rather than
+    # whatever the previous one recorded.
+    if pinned and pinned != head_sha():
+        regenerate(head_sha())
+        print("refreshed generator_sha to HEAD")
 
     add = git("add", "--", str(GOLDEN))
     if add.returncode != 0:
