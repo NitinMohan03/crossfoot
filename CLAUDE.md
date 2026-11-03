@@ -6,8 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Setup: `just setup` (= `docker compose up -d --wait && uv sync`). Python 3.12 pinned; never use system 3.14.
 - All checks: `just check` (ruff, ruff format --check, mypy strict, pytest). Run before saying anything is done.
 - Single test: `uv run pytest tests/test_smoke.py::test_package_imports`
-- DB: `just db-shell` (psql), `just db-reset` (wipe volume). Extensions `vector` + `pg_trgm` load from `docker/initdb/`.
-- Eval/seed/cost recipes do not exist yet — added per phase in `reconciliation-agent-plan.md` Part 4.
+- DB: `just db-shell` (psql), `just db-reset` (wipe volume). Extensions `vector` + `pg_trgm` load from `docker/initdb/`. Host port is **5433** (a native Windows postgres often holds 5432).
+- `just db-ref data/full` loads the FX rate and bank-holiday tables into the `ref` schema.
+- `just proc-api data/full 8099` serves the mock payment processor REST API.
+- Eval/cost recipes do not exist yet — added per phase in `reconciliation-agent-plan.md` Part 4.
 
 # Architecture
 - Deterministic rules run FIRST (`src/crossfoot/matching/`). LLM only sees what rules can't resolve.

@@ -6,7 +6,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crossfoot}
       POSTGRES_DB: ${POSTGRES_DB:-crossfoot}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # 5433 on the host: a native Windows postgres service commonly holds 5432, and when it
+      # does it wins host connections silently -- the container is then only reachable through
+      # `docker compose exec`. Inside the container the port is still 5432.
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/initdb:/docker-entrypoint-initdb.d:ro

@@ -72,6 +72,10 @@ validate DIR="data/full":
 proc-api DIR="data/full" PORT="8099":
     uv run python -m crossfoot.mock_processor --data {{DIR}} --port {{PORT}}
 
+# Load the FX rate and bank-holiday tables into Postgres (plan §4.4)
+db-ref DIR="data/full":
+    uv run python -m crossfoot.db load-reference --dir {{DIR}}
+
 # Load a generated ERP dump into Postgres (Phase 2 does this properly)
 db-load DIR="data/full":
     Get-Content {{DIR}}/erp.sql | docker compose exec -T db psql -U crossfoot -d crossfoot -v ON_ERROR_STOP=1
