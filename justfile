@@ -68,6 +68,10 @@ golden MSG="":
 validate DIR="data/full":
     uv run python -m crossfoot.generate.validate {{DIR}}
 
+# Serve the generated settlement data as a mock processor REST API (plan §4.4)
+proc-api DIR="data/full" PORT="8099":
+    uv run python -m crossfoot.mock_processor --data {{DIR}} --port {{PORT}}
+
 # Load a generated ERP dump into Postgres (Phase 2 does this properly)
 db-load DIR="data/full":
     Get-Content {{DIR}}/erp.sql | docker compose exec -T db psql -U crossfoot -d crossfoot -v ON_ERROR_STOP=1
