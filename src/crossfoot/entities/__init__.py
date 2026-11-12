@@ -9,6 +9,7 @@ from crossfoot.entities.index import Candidate, NameIndex
 from crossfoot.entities.registry import (
     EVAL_ENV,
     PROVENANCE,
+    SELECT_SQL,
     Alias,
     AliasRegistry,
     RegistryFrozen,
@@ -19,6 +20,7 @@ from crossfoot.entities.resolver import resolve, resolve_description
 __all__ = [
     "EVAL_ENV",
     "PROVENANCE",
+    "SELECT_SQL",
     "Alias",
     "AliasRegistry",
     "Candidate",

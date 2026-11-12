@@ -60,4 +60,6 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# `-rs` so skips are printed: the DB-backed tests skip when Postgres is unreachable, and a green
+# run with silent skips is not evidence that they ran.
+addopts = "-q -rs"

@@ -15,7 +15,7 @@ What makes this hard is not the lookup, it is the discipline around the write:
 """
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final, Self
@@ -31,6 +31,9 @@ PROVENANCE: Final = "human_confirmed"
 EVAL_ENV: Final = "CROSSFOOT_EVAL_RUN"
 
 TABLE: Final = "er.counterparty_alias"
+
+#: The one read of the registry. Servers run it through their own read-only cursor.
+SELECT_SQL: Final = f"SELECT alias_norm, counterparty_id FROM {TABLE}"
 
 
 class RegistryFrozen(RuntimeError):
@@ -65,9 +68,14 @@ class AliasRegistry:
     def load(cls, conn: psycopg.Connection[Any], *, frozen: bool = True) -> Self:
         """Read every confirmed alias. Frozen unless the caller is the review path."""
         with conn.cursor() as cur:
-            cur.execute(f"SELECT alias_norm, counterparty_id FROM {TABLE}")
+            cur.execute(SELECT_SQL)
             rows = cur.fetchall()
-        return cls({str(row[0]): int(row[1]) for row in rows}, frozen=frozen)
+        return cls.from_pairs(((str(row[0]), int(row[1])) for row in rows), frozen=frozen)
+
+    @classmethod
+    def from_pairs(cls, pairs: Iterable[tuple[str, int]], *, frozen: bool = True) -> Self:
+        """Build from rows a caller already read, so a server can use its own cursor."""
+        return cls(dict(pairs), frozen=frozen)
 
     @classmethod
     def empty(cls) -> Self:

@@ -84,6 +84,10 @@ db-er:
 db-roles:
     uv run python -m crossfoot.db apply-roles
 
+# Serve the ERP over MCP on stdio (plan §4.4). Reads as the crossfoot_ro role.
+mcp-erp SCHEMA="erp":
+    uv run python -m crossfoot.mcp.erp --schema {{SCHEMA}}
+
 # Load a generated ERP dump into Postgres. The dump drops schema `erp`, which takes the
 # read-only role's grants with it, so they are re-applied here -- without this the no-write
 # test would pass for the wrong reason.
