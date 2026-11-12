@@ -158,8 +158,9 @@ def test_a_description_with_a_reference_after_the_name_still_resolves(
     index: NameIndex, empty: AliasRegistry
 ) -> None:
     party = resolve_description("ACME WIDGETS LT INV-2024-0891", index, empty)
-    # The trading name "ACME WIDGETS" is itself a leading run of tokens, so this is exact.
-    assert (party.counterparty_id, party.method) == (7, "exact")
+    # `ACME WIDGETS LT` is the longest identifying run, and it identifies by truncation, so the
+    # method is `normalised` -- not the `exact` hit the shorter `ACME WIDGETS` would have given.
+    assert (party.counterparty_id, party.method) == (7, "normalised")
     # `surface` stays the whole field: the matcher may still want the part that was not a name.
     assert party.surface == "ACME WIDGETS LT INV-2024-0891"
 
@@ -196,3 +197,81 @@ def test_an_index_reports_what_it_holds() -> None:
     assert len(index) == 2
     assert index.names_for(7) == ("ACME WIDGETS LTD", "ACME WIDGETS")
     assert index.names_for(404) == ()
+
+
+def test_a_subset_name_does_not_outscore_the_counterparty_the_payer_meant(
+    empty: AliasRegistry,
+) -> None:
+    """Measured on the generated world: `token_set_ratio` alone resolves this wrongly.
+
+    `STANWICK` (a real trading name in `data/full`) is a token subset of `STANWICK UTILITI3S`,
+    so `token_set_ratio` scores it 100, while the typo drops the `STANWICK UTILITIES` the payer
+    meant to 94. Ranking on the gate score alone therefore hands the invoice to the wrong
+    company -- which is what the live server did before `min(set, sort)` ranked the candidates.
+    """
+    stanwick = NameIndex(
+        [
+            Candidate(
+                counterparty_id=164,
+                legal_name="STANWICK PACKAGING LIMITED",
+                trading_name="STANWICK",
+            ),
+            Candidate(
+                counterparty_id=250,
+                legal_name="STANWICK UTILITIES & CO",
+                trading_name="STANWICK UTILITIES",
+            ),
+        ]
+    )
+    # The inflated score is real, and it is the higher of the two.
+    assert similarity("STANWICK", "STANWICK UTILITI3S & CO") == 100
+    assert similarity("STANWICK UTILITIES", "STANWICK UTILITI3S & CO") == 94
+
+    party = resolve("STANWICK UTILITI3S & CO", stanwick, empty)
+    assert party.counterparty_id == 250
+    assert party.method == "fuzzy"
+    # The reported score stays the shared metric, `token_set_ratio`.
+    assert party.similarity == 94
+
+
+def test_the_longest_prefix_that_identifies_someone_wins(empty: AliasRegistry) -> None:
+    stanwick = NameIndex(
+        [
+            Candidate(counterparty_id=164, legal_name="STANWICK", trading_name="STANWICK"),
+            Candidate(
+                counterparty_id=250,
+                legal_name="STANWICK UTILITIES & CO",
+                trading_name="STANWICK UTILITIES",
+            ),
+        ]
+    )
+    # `STANWICK UTILITIES` is the longer run of tokens, so it wins even though `STANWICK` alone
+    # is also an exact counterparty name.
+    assert (
+        resolve_description("STANWICK UTILITIES INV-2024-0180", stanwick, empty).counterparty_id
+        == 250
+    )
+    # And on its own, `STANWICK` still resolves to the counterparty of that name.
+    assert resolve_description("STANWICK INV-2024-0180", stanwick, empty).counterparty_id == 164
+
+
+def test_a_structural_hit_on_a_short_prefix_beats_a_fuzzy_hit_on_a_long_one() -> None:
+    """The known limit, pinned so a later change to it is deliberate (see resolver docstring).
+
+    A typo in the second token leaves `STANWICK` as the only structural hit, and structural
+    always beats fuzzy -- so this resolves to the single-token counterparty, not to the longer
+    name a human would read. Session 2.2 has the real bank descriptions to decide whether that
+    ordering is right.
+    """
+    stanwick = NameIndex(
+        [
+            Candidate(counterparty_id=164, legal_name="STANWICK", trading_name="STANWICK"),
+            Candidate(
+                counterparty_id=250,
+                legal_name="STANWICK UTILITIES & CO",
+                trading_name="STANWICK UTILITIES",
+            ),
+        ]
+    )
+    party = resolve_description("STANWICK UTILITI3S INV-2024-0180", stanwick, AliasRegistry.empty())
+    assert (party.counterparty_id, party.method) == (164, "exact")

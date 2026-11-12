@@ -22,6 +22,15 @@ reference after the name (`ACME WIDGETS LTD INV-2024-0891`). Nothing marks the b
 candidate forms are every leading run of whole tokens -- the recovery
 `crossfoot.names.token_prefixes` exists for, done here once rather than guessed again in each
 source's server.
+
+**Known limit, for session 2.2 to measure rather than guess at now.** A structural hit always
+beats a fuzzy one, so if one counterparty is called `STANWICK` and another `STANWICK UTILITIES`,
+the description `STANWICK UTILITI3S INV-2024-0180` resolves to `STANWICK` on an exact
+single-token hit, even though a human would read the typo as the longer name. Letting a fuzzy
+match on a longer prefix outrank an exact match on a shorter one would fix that case and could
+break others, and nothing here measures which is more common. `mcp-bank` works on real bank
+descriptions and will have the evidence; until then the behaviour is this, and it is tested so a
+change to it is deliberate.
 """
 
 from collections.abc import Sequence
@@ -32,8 +41,10 @@ from crossfoot.entities.registry import AliasRegistry
 from crossfoot.models.canonical import PartyRef, ResolutionMethod
 from crossfoot.names import (
     best_similarity,
+    best_sort_similarity,
     normalise,
     surface_similarity,
+    surface_sort_similarity,
     token_prefixes,
     trivially_normalises,
 )
@@ -67,49 +78,60 @@ def _only(ids: set[int]) -> int | None:
     return next(iter(ids)) if len(ids) == 1 else None
 
 
-def _exact_ids(index: NameIndex, forms: Sequence[str]) -> set[int]:
-    return {
-        candidate.counterparty_id
-        for candidate in index.candidates
-        if any(form in candidate.names for form in forms)
-    }
+def _exact_ids(index: NameIndex, form: str) -> set[int]:
+    return {candidate.counterparty_id for candidate in index.candidates if form in candidate.names}
 
 
-def _normalised_ids(index: NameIndex, forms: Sequence[str]) -> set[int]:
-    """Counterparties whose name normalises to a form, truncation included (spec 01 §4.1)."""
+def _normalised_ids(index: NameIndex, form: str) -> set[int]:
+    """Counterparties whose name normalises to `form`, truncation included (spec 01 §4.1)."""
+    key = normalise(form)
     found: set[int] = set()
     for candidate in index.candidates:
         known = {normalise(name) for name in candidate.names}
-        for form in forms:
-            key = normalise(form)
-            truncated = any(trivially_normalises(name, form) for name in candidate.names)
-            if (key and key in known) or truncated:
-                found.add(candidate.counterparty_id)
-                break
+        truncated = any(trivially_normalises(name, form) for name in candidate.names)
+        if (key and key in known) or truncated:
+            found.add(candidate.counterparty_id)
     return found
 
 
-def _alias_ids(registry: AliasRegistry, forms: Sequence[str]) -> set[int]:
-    return {found for form in forms if (found := registry.lookup(form)) is not None}
+def _alias_ids(registry: AliasRegistry, form: str) -> set[int]:
+    found = registry.lookup(form)
+    return set() if found is None else {found}
 
 
 def _best_fuzzy(index: NameIndex, surface: str, *, prefixes: bool) -> tuple[int | None, int]:
-    """The single best-scoring candidate and its score, or `(None, best)` on a tie."""
-    scores = [
-        (
-            surface_similarity(candidate.names, surface)
-            if prefixes
-            else best_similarity(candidate.names, surface),
-            candidate.counterparty_id,
-        )
-        for candidate in index.candidates
-    ]
-    if not scores:
+    """The single best fuzzy candidate and its `token_set_ratio`, or `(None, best)` on no winner.
+
+    The gate is `token_set_ratio >= Thresholds.NAME_SIM_MIN`, which is what spec 01 §4 defines
+    and what the generator asserts against. The *winner* among the candidates that clear it is
+    chosen on `min(token_set_ratio, token_sort_ratio)`, because `token_set_ratio` returns 100
+    whenever one name's token set is a subset of the other's. Measured on the generated world: a
+    counterparty trading as `STANWICK` scores 100 against `STANWICK UTILITI3S`, while the
+    `STANWICK UTILITIES` the payer meant scores 94, so ranking on the gate score alone hands the
+    invoice to the wrong company. `token_sort_ratio` cannot be inflated by a subset, so the
+    minimum of the two ranks the short name back down to 62 and the right one wins.
+    """
+    scored: list[tuple[int, int, int]] = []
+    for candidate in index.candidates:
+        if prefixes:
+            gate = surface_similarity(candidate.names, surface)
+            rank = min(gate, surface_sort_similarity(candidate.names, surface))
+        else:
+            gate = best_similarity(candidate.names, surface)
+            rank = min(gate, best_sort_similarity(candidate.names, surface))
+        scored.append((gate, rank, candidate.counterparty_id))
+    if not scored:
         return None, 0
-    best = max(score for score, _ in scores)
-    if best < Thresholds.NAME_SIM_MIN:
-        return None, best
-    return _only({counterparty_id for score, counterparty_id in scores if score == best}), best
+    best_gate = max(gate for gate, _, _ in scored)
+    if best_gate < Thresholds.NAME_SIM_MIN:
+        return None, best_gate
+    passed = [entry for entry in scored if entry[0] >= Thresholds.NAME_SIM_MIN]
+    best_rank = max(rank for _, rank, _ in passed)
+    winners = {entry for entry in passed if entry[1] == best_rank}
+    winner = _only({counterparty_id for _, _, counterparty_id in winners})
+    if winner is None:
+        return None, best_gate
+    return winner, next(gate for gate, _, counterparty_id in winners if counterparty_id == winner)
 
 
 def _resolve(
@@ -123,19 +145,24 @@ def _resolve(
     if not normalise(surface):
         return _unresolved(surface)
 
-    for method, ids in (
-        ("exact", _exact_ids(index, forms)),
-        ("normalised", _normalised_ids(index, forms)),
-        ("alias", _alias_ids(registry, forms)),
-    ):
-        if not ids:
-            continue
-        found = _only(ids)
-        if found is None:
-            # Two counterparties identified equally well. Nothing further can improve on that,
-            # and picking one would be picking by row order.
-            return _unresolved(surface, STRUCTURAL)
-        return _party(surface, found, method, STRUCTURAL)  # type: ignore[arg-type]
+    # Form-major, longest form first: the longest run of tokens that identifies somebody is the
+    # name, and a shorter run that also identifies somebody is a coincidence of that name's
+    # first word. Layer-major order would let a counterparty literally called `STANWICK` claim
+    # `STANWICK UTILITIES INV-2024-0180` on an exact hit against one token.
+    for form in forms:
+        for method, ids in (
+            ("exact", _exact_ids(index, form)),
+            ("normalised", _normalised_ids(index, form)),
+            ("alias", _alias_ids(registry, form)),
+        ):
+            if not ids:
+                continue
+            found = _only(ids)
+            if found is None:
+                # Two counterparties identified equally well. Nothing further can improve on
+                # that, and picking one would be picking by row order.
+                return _unresolved(surface, STRUCTURAL)
+            return _party(surface, found, method, STRUCTURAL)  # type: ignore[arg-type]
 
     winner, best = _best_fuzzy(index, surface, prefixes=prefixes)
     if winner is None:

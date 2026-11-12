@@ -50,9 +50,31 @@ def similarity(left: str, right: str) -> int:
     return round(score)
 
 
+def sort_similarity(left: str, right: str) -> int:
+    """RapidFuzz `token_sort_ratio` over normalised names, 0-100.
+
+    The companion to `similarity`, and not a second threshold. `token_set_ratio` returns 100
+    whenever one name's tokens are a *subset* of the other's, so a counterparty trading as
+    `STANWICK` scores 100 against `STANWICK UTILITI3S` -- higher than the `STANWICK UTILITIES`
+    the payer actually meant, which a typo drops to 94. `token_sort_ratio` cannot be inflated
+    that way, so entity resolution uses it to *rank* the candidates the shared threshold let
+    through. The threshold itself stays `token_set_ratio`, which is what spec 01 §4 defines and
+    what the generator asserts against.
+    """
+    score: object = fuzz.token_sort_ratio(normalise(left), normalise(right))
+    if not isinstance(score, (int, float)):
+        raise TypeError(f"token_sort_ratio returned {type(score).__name__}")
+    return round(score)
+
+
 def best_similarity(candidates: Iterable[str], surface: str) -> int:
     """The highest similarity of `surface` against any of `candidates` (legal, trading, ...)."""
     return max((similarity(candidate, surface) for candidate in candidates), default=0)
+
+
+def best_sort_similarity(candidates: Iterable[str], surface: str) -> int:
+    """The highest `sort_similarity` of `surface` against any of `candidates`."""
+    return max((sort_similarity(candidate, surface) for candidate in candidates), default=0)
 
 
 def token_prefixes(text: str) -> list[str]:
@@ -72,6 +94,14 @@ def surface_similarity(candidates: Iterable[str], description: str) -> int:
     names = list(candidates)
     return max(
         (best_similarity(names, prefix) for prefix in token_prefixes(description)), default=0
+    )
+
+
+def surface_sort_similarity(candidates: Iterable[str], description: str) -> int:
+    """Best `sort_similarity` of any token prefix of `description` against any of `candidates`."""
+    names = list(candidates)
+    return max(
+        (best_sort_similarity(names, prefix) for prefix in token_prefixes(description)), default=0
     )
 
 
