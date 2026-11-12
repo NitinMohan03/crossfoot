@@ -80,6 +80,13 @@ db-ref DIR="data/full":
 db-er:
     uv run python -m crossfoot.db apply-er
 
-# Load a generated ERP dump into Postgres (Phase 2 does this properly)
+# Create the read-only role the MCP servers connect as (plan §3.3). Needs a privileged user.
+db-roles:
+    uv run python -m crossfoot.db apply-roles
+
+# Load a generated ERP dump into Postgres. The dump drops schema `erp`, which takes the
+# read-only role's grants with it, so they are re-applied here -- without this the no-write
+# test would pass for the wrong reason.
 db-load DIR="data/full":
     Get-Content {{DIR}}/erp.sql | docker compose exec -T db psql -U crossfoot -d crossfoot -v ON_ERROR_STOP=1
+    uv run python -m crossfoot.db apply-roles
