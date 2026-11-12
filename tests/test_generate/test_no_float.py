@@ -11,7 +11,7 @@ import crossfoot
 NEEDLE = "float" + "("  # assembled so this file does not match itself
 # `mock_processor` is deliberately absent: it never parses an amount (records are served as the
 # JSON lines the generator wrote), and the only floats in it are the rate limiter's clock seconds.
-GUARDED = ("generate", "matching", "blocking", "models", "db")
+GUARDED = ("generate", "matching", "blocking", "models", "db", "entities", "mcp", "ingest")
 
 
 def test_no_float_constructor_in_money_handling_packages() -> None:

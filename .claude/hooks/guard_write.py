@@ -19,6 +19,9 @@ NO_FLOAT = (
     "src/crossfoot/models/",
     "src/crossfoot/generate/",
     "src/crossfoot/db/",
+    "src/crossfoot/entities/",
+    "src/crossfoot/mcp/",
+    "src/crossfoot/ingest/",
 )
 LLM_ONLY = "src/crossfoot/llm/"
 ANTHROPIC_IMPORT = re.compile(r"^\s*(import\s+anthropic\b|from\s+anthropic\b)", re.MULTILINE)

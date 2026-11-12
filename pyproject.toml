@@ -22,6 +22,8 @@ dependencies = [
     "uvicorn>=0.32",
     # Postgres access: the reference-table loader, and every DB-side read from Phase 2.1 on.
     "psycopg[binary]>=3.2",
+    "mcp>=2.3.0",
+    "pydantic>=2.14.2",
 ]
 
 [dependency-groups]
