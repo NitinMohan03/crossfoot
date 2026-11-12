@@ -88,6 +88,28 @@ every counterparty it matches and answers only when there is exactly one, so two
 collide after normalisation and two equal fuzzy scores both come back unresolved rather than
 resolved by whichever row arrived first.
 
+A bank description is a name with a typed reference possibly stuck on the end, and nothing marks
+the boundary, so the resolver walks its token prefixes longest first. At each prefix it tries the
+structural layers and then a fuzzy match **on that prefix alone**, scored
+`min(token_set_ratio, ratio)`. That rule is a measurement, not a preference. On the dev slice's
+881 bank lines that ground truth ties to an invoice, with an empty registry:
+
+| Rule | Correct | Wrong | Unresolved |
+|---|---|---|---|
+| structural layers first, fuzzy last on the best `token_set_ratio` of any prefix | 847 | 22 | 12 |
+| the same, with a fuzzy hit on a longer prefix allowed to outrank a structural one | 848 | 22 | 11 |
+| per prefix, `min(token_set_ratio, ratio)` | 836 | **3** | 42 |
+
+`token_set_ratio` scores a subset 100, and a one-word prefix is a subset of every name that
+starts with that word, so the first rule handed 16 of the slice's 26 parent-company payers to an
+unrelated counterparty sharing a first word — at a reported similarity of 100. The price of the
+fix is 13 lone-first-word descriptions (`JARVIS`) that used to resolve and now abstain; they
+resolved only because a 60-counterparty world holds one `JARVIS`. An abstention goes to review, a
+wrong answer goes into the ledger. The three that remain wrong are descriptions that are,
+character for character, a *different* counterparty's trading name; no string rule separates
+those, and the amount and reference have to. `tests/test_entities/test_bank_descriptions.py`
+keeps the numbers.
+
 The registry (`er.counterparty_alias`) is the part Part 2 of the plan calls harder than the LLM
 work, and it has two properties that the eval numbers depend on:
 

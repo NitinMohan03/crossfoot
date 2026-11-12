@@ -7,8 +7,8 @@ Four layers, first hit wins, each one cheaper and more certain than the next:
    32-character truncation (`crossfoot.names`, shared with the generator).
 3. **alias** -- a human confirmed it (`crossfoot.entities.registry`). This is the layer that
    catches DBA and parent-company names, which no string metric relates.
-4. **fuzzy** -- RapidFuzz `token_set_ratio` at or above `Thresholds.NAME_SIM_MIN`. The
-   threshold is imported; the number appears nowhere in this package.
+4. **fuzzy** -- RapidFuzz at or above `Thresholds.NAME_SIM_MIN`. The threshold is imported; the
+   number appears nowhere in this package.
 
 **No layer may answer by row order.** Every one of them collects all the counterparties it
 matches and answers only if there is exactly one: two counterparties matching equally well is
@@ -23,14 +23,39 @@ candidate forms are every leading run of whole tokens -- the recovery
 `crossfoot.names.token_prefixes` exists for, done here once rather than guessed again in each
 source's server.
 
-**Known limit, for session 2.2 to measure rather than guess at now.** A structural hit always
-beats a fuzzy one, so if one counterparty is called `STANWICK` and another `STANWICK UTILITIES`,
-the description `STANWICK UTILITI3S INV-2024-0180` resolves to `STANWICK` on an exact
-single-token hit, even though a human would read the typo as the longer name. Letting a fuzzy
-match on a longer prefix outrank an exact match on a shorter one would fix that case and could
-break others, and nothing here measures which is more common. `mcp-bank` works on real bank
-descriptions and will have the evidence; until then the behaviour is this, and it is tested so a
-change to it is deliberate.
+**The description rule, measured in session 2.2** on the dev slice's 881 bank lines that the
+manifest ties to an invoice (`tests/test_entities/test_bank_descriptions.py` keeps the numbers):
+
+    Walk the prefixes longest first. At each one try exact, normalised and alias; failing
+    those, try a fuzzy match *on that prefix alone*, scored `min(token_set_ratio, ratio)`.
+    The first prefix that identifies anyone is the name.
+
+Two things that rule replaced, and why:
+
+* Fuzzy used to run last, over the best `token_set_ratio` of *any* prefix. A one-token prefix
+  is a subset of every name beginning with that word, and `token_set_ratio` scores a subset
+  100, so one shared leading word passed the gate at full marks: `BRAMBLE PROPERTIES GROUP PLC`,
+  a parent company no string relates to its subsidiary, resolved to `BRAMBLE DESIGN LTD`. That
+  was 16 of the slice's 26 parent/DBA lines handed to an unrelated counterparty. Scoring both
+  metrics on the *same* prefix closes it: the plain ratio cannot be inflated by a subset.
+* A structural hit used to beat any fuzzy one, so `STANWICK UTILITI3S INV-2024-0180` resolved to
+  a counterparty called `STANWICK` on an exact one-token hit. Trying fuzzy at each prefix on the
+  way down lets the longer run of tokens answer first. Reversing that order *without* the
+  stricter score was measured too and is worse, not better: it only lets the inflated match in
+  earlier.
+
+Measured: 22 wrong answers became 3, and 13 correct ones became unresolved -- every one a lone
+first word (`JARVIS`, `ELMWOOD INV-2024-0375`) that had resolved only because a 60-counterparty
+world holds one `JARVIS`. Unresolved goes to the registry or to review; wrong goes into the
+ledger.
+
+**What no string rule can fix.** A description that is, character for character, another
+counterparty's trading name: a payer who truncates `EASTGATE HOLDINGS LTD` to `EASTGATE` has
+written the trading name of `EASTGATE TRADING LTD`. Those three lines stay wrong here; the
+amount and the reference are what tell them apart, and that is the matcher's work.
+
+`resolve` -- a name that is only a name -- is unchanged: it gates on `token_set_ratio`, which is
+what spec 01 §4 defines, and ranks the passers on `min(token_set_ratio, token_sort_ratio)`.
 """
 
 from collections.abc import Sequence
@@ -43,8 +68,8 @@ from crossfoot.names import (
     best_similarity,
     best_sort_similarity,
     normalise,
-    surface_similarity,
-    surface_sort_similarity,
+    ordered_similarity,
+    similarity,
     token_prefixes,
     trivially_normalises,
 )
@@ -99,8 +124,23 @@ def _alias_ids(registry: AliasRegistry, form: str) -> set[int]:
     return set() if found is None else {found}
 
 
-def _best_fuzzy(index: NameIndex, surface: str, *, prefixes: bool) -> tuple[int | None, int]:
-    """The single best fuzzy candidate and its `token_set_ratio`, or `(None, best)` on no winner.
+def _structural(
+    index: NameIndex, registry: AliasRegistry, form: str
+) -> tuple[ResolutionMethod, set[int]] | None:
+    """The first structural layer that names anyone for `form`, and everyone it names."""
+    layers: tuple[tuple[ResolutionMethod, set[int]], ...] = (
+        ("exact", _exact_ids(index, form)),
+        ("normalised", _normalised_ids(index, form)),
+        ("alias", _alias_ids(registry, form)),
+    )
+    for method, ids in layers:
+        if ids:
+            return method, ids
+    return None
+
+
+def _best_fuzzy(index: NameIndex, surface: str) -> tuple[int | None, int]:
+    """The single best fuzzy candidate for a bare name, or `(None, best)` on no winner.
 
     The gate is `token_set_ratio >= Thresholds.NAME_SIM_MIN`, which is what spec 01 §4 defines
     and what the generator asserts against. The *winner* among the candidates that clear it is
@@ -113,12 +153,8 @@ def _best_fuzzy(index: NameIndex, surface: str, *, prefixes: bool) -> tuple[int 
     """
     scored: list[tuple[int, int, int]] = []
     for candidate in index.candidates:
-        if prefixes:
-            gate = surface_similarity(candidate.names, surface)
-            rank = min(gate, surface_sort_similarity(candidate.names, surface))
-        else:
-            gate = best_similarity(candidate.names, surface)
-            rank = min(gate, best_sort_similarity(candidate.names, surface))
+        gate = best_similarity(candidate.names, surface)
+        rank = min(gate, best_sort_similarity(candidate.names, surface))
         scored.append((gate, rank, candidate.counterparty_id))
     if not scored:
         return None, 0
@@ -132,6 +168,30 @@ def _best_fuzzy(index: NameIndex, surface: str, *, prefixes: bool) -> tuple[int 
     if winner is None:
         return None, best_gate
     return winner, next(gate for gate, _, counterparty_id in winners if counterparty_id == winner)
+
+
+def _prefix_fuzzy(index: NameIndex, form: str) -> tuple[set[int], int]:
+    """Who one prefix of a description fuzzily names, and the best score any candidate reached.
+
+    The score is `min(token_set_ratio, ratio)` with both taken on this same prefix: the set
+    ratio forgives a legal suffix or an inserted `(UK)`, the plain ratio refuses to be impressed
+    by a subset. The ids returned are the candidates sharing the best score, and only when that
+    score clears the shared threshold -- so an empty set means "nobody", one id is an answer,
+    and more than one is a tie the caller must not break.
+    """
+    best = 0
+    winners: set[int] = set()
+    for candidate in index.candidates:
+        score = max(
+            min(similarity(name, form), ordered_similarity(name, form)) for name in candidate.names
+        )
+        if score > best:
+            best, winners = score, {candidate.counterparty_id}
+        elif score == best:
+            winners.add(candidate.counterparty_id)
+    if best < Thresholds.NAME_SIM_MIN:
+        return set(), best
+    return winners, best
 
 
 def _resolve(
@@ -149,22 +209,44 @@ def _resolve(
     # name, and a shorter run that also identifies somebody is a coincidence of that name's
     # first word. Layer-major order would let a counterparty literally called `STANWICK` claim
     # `STANWICK UTILITIES INV-2024-0180` on an exact hit against one token.
-    for form in forms:
-        for method, ids in (
-            ("exact", _exact_ids(index, form)),
-            ("normalised", _normalised_ids(index, form)),
-            ("alias", _alias_ids(registry, form)),
-        ):
-            if not ids:
-                continue
+    near_miss = 0
+    for position, form in enumerate(forms):
+        hit = _structural(index, registry, form)
+        if hit is not None:
+            method, ids = hit
             found = _only(ids)
             if found is None:
                 # Two counterparties identified equally well. Nothing further can improve on
                 # that, and picking one would be picking by row order.
                 return _unresolved(surface, STRUCTURAL)
-            return _party(surface, found, method, STRUCTURAL)  # type: ignore[arg-type]
+            return _party(surface, found, method, STRUCTURAL)
+        if not prefixes:
+            continue
+        # A description: fuzzy belongs to this prefix too, so that a typo in a long name is
+        # read as that name before a shorter prefix gets the chance to be someone else.
+        fuzzy_ids, best = _prefix_fuzzy(index, form)
+        near_miss = max(near_miss, best)
+        if not fuzzy_ids:
+            continue
+        found = _only(fuzzy_ids)
+        if found is None:
+            return _unresolved(surface, best)
+        # `MERIDIAN AEROSPACE INV0014` is near enough to `MERIDIAN AEROSPACE` to pass as a
+        # fuzzy match with the reference still attached. That decides *who*; it should not
+        # decide *how well*. If a shorter prefix is that same counterparty's name outright,
+        # say so -- the party was identified structurally, the reference just came along.
+        for shorter in forms[position + 1 :]:
+            confirmed = _structural(index, registry, shorter)
+            if confirmed is None:
+                continue
+            if confirmed[1] == {found}:
+                return _party(surface, found, confirmed[0], STRUCTURAL)
+            break
+        return _party(surface, found, "fuzzy", best)
 
-    winner, best = _best_fuzzy(index, surface, prefixes=prefixes)
+    if prefixes:
+        return _unresolved(surface, near_miss)
+    winner, best = _best_fuzzy(index, surface)
     if winner is None:
         return _unresolved(surface, best)
     return _party(surface, winner, "fuzzy", best)

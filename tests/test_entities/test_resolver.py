@@ -255,23 +255,91 @@ def test_the_longest_prefix_that_identifies_someone_wins(empty: AliasRegistry) -
     assert resolve_description("STANWICK INV-2024-0180", stanwick, empty).counterparty_id == 164
 
 
-def test_a_structural_hit_on_a_short_prefix_beats_a_fuzzy_hit_on_a_long_one() -> None:
-    """The known limit, pinned so a later change to it is deliberate (see resolver docstring).
+STANWICKS = NameIndex(
+    [
+        Candidate(counterparty_id=164, legal_name="STANWICK", trading_name="STANWICK"),
+        Candidate(
+            counterparty_id=250,
+            legal_name="STANWICK UTILITIES & CO",
+            trading_name="STANWICK UTILITIES",
+        ),
+    ]
+)
 
-    A typo in the second token leaves `STANWICK` as the only structural hit, and structural
-    always beats fuzzy -- so this resolves to the single-token counterparty, not to the longer
-    name a human would read. Session 2.2 has the real bank descriptions to decide whether that
-    ordering is right.
+
+def test_a_fuzzy_hit_on_a_long_prefix_beats_a_structural_hit_on_a_short_one() -> None:
+    """The limit session 2.1 pinned the other way round, reversed on session 2.2's measurement.
+
+    A typo in the second token leaves `STANWICK` as the only structural hit. Structural used to
+    beat fuzzy outright, so this resolved to the single-token counterparty; fuzzy now runs at
+    each prefix on the way down, so the longer run of tokens answers first -- which is how a
+    human reads it. `tests/test_entities/test_bank_descriptions.py` holds the numbers that
+    decided it.
     """
-    stanwick = NameIndex(
+    party = resolve_description(
+        "STANWICK UTILITI3S INV-2024-0180", STANWICKS, AliasRegistry.empty()
+    )
+    assert (party.counterparty_id, party.method, party.similarity) == (250, "fuzzy", 94)
+
+
+def test_one_shared_leading_word_is_not_a_fuzzy_match(empty: AliasRegistry) -> None:
+    """What the reversal needs to be safe: a subset cannot pass the description gate.
+
+    `BRAMBLE` is a subset of `BRAMBLE DESIGN`, so `token_set_ratio` scores the one-token prefix
+    100 -- which is how a parent company sharing a first word with an unrelated counterparty
+    used to be handed to it. The plain ratio on the same prefix is 67, and the minimum decides.
+    """
+    bramble = NameIndex(
         [
-            Candidate(counterparty_id=164, legal_name="STANWICK", trading_name="STANWICK"),
             Candidate(
-                counterparty_id=250,
-                legal_name="STANWICK UTILITIES & CO",
-                trading_name="STANWICK UTILITIES",
-            ),
+                counterparty_id=7, legal_name="BRAMBLE DESIGN LTD", trading_name="BRAMBLE DESIGN"
+            )
         ]
     )
-    party = resolve_description("STANWICK UTILITI3S INV-2024-0180", stanwick, AliasRegistry.empty())
-    assert (party.counterparty_id, party.method) == (164, "exact")
+    assert similarity("BRAMBLE DESIGN LTD", "BRAMBLE") == 100
+    party = resolve_description("BRAMBLE PROPERTIES GROUP PLC", bramble, empty)
+    assert party.counterparty_id is None
+    assert party.similarity < Thresholds.NAME_SIM_MIN
+
+
+def test_two_equally_distant_typos_are_a_tie_not_a_guess(empty: AliasRegistry) -> None:
+    # `PAZRICK` is two letters from both. Ranking on a sorted-token ratio used to pick GARRICK,
+    # because sorting moves `CARRICK` in front of `FABRICATION` and `GARRICK`/`PAZRICK` behind.
+    twins = NameIndex(
+        [
+            Candidate(41, "CARRICK FABRICATION LIMITED", "CARRICK FABRICATION LIMITED"),
+            Candidate(58, "GARRICK FABRICATION LLP", "GARRICK FABRICATION LLP"),
+        ]
+    )
+    party = resolve_description("PAZRICK FABRICATION LIMITED", twins, empty)
+    assert party.counterparty_id is None
+    assert party.similarity >= Thresholds.NAME_SIM_MIN
+
+
+def test_a_reference_riding_on_an_exact_name_does_not_make_the_match_fuzzy(
+    empty: AliasRegistry,
+) -> None:
+    # The whole field is close enough to the name to pass as fuzzy with the reference attached.
+    # That may decide who; it must not downgrade an exact name to a score of 82.
+    meridian = NameIndex([Candidate(3, "MERIDIAN AEROSPACE LLP", "MERIDIAN AEROSPACE")])
+    party = resolve_description("MERIDIAN AEROSPACE INV0014", meridian, empty)
+    assert (party.counterparty_id, party.method, party.similarity) == (3, "exact", 100)
+
+
+def test_a_description_that_is_another_partys_trading_name_resolves_to_that_party(
+    empty: AliasRegistry,
+) -> None:
+    """What no string rule can fix, pinned so nobody thinks the resolver handles it.
+
+    A payer who truncates `EASTGATE HOLDINGS LTD` to `EASTGATE` has written, character for
+    character, the trading name of a different counterparty. The amount and the reference are
+    what tell the two apart, and that is the matcher's job.
+    """
+    eastgate = NameIndex(
+        [
+            Candidate(11, "EASTGATE TRADING LTD", "EASTGATE"),
+            Candidate(12, "EASTGATE HOLDINGS LTD", "EASTGATE HOLDINGS LTD"),
+        ]
+    )
+    party = resolve_description("EASTGATE", eastgate, empty)
+    assert (party.counterparty_id, party.method) == (11, "exact")
