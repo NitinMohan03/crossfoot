@@ -10,17 +10,17 @@ import csv
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from importlib.resources import files
 from pathlib import Path
 from typing import Any, Final
 
 import psycopg
 
+from crossfoot.db.schema import REF_SQL, sql
+
 FX_FILE: Final = "fx_rates.csv"
 HOLIDAY_FILE: Final = "holidays_gb_eng.csv"
 REGION: Final = "GB-ENG"
 PPM: Final = 1_000_000
-DDL_FILE: Final = "ref.sql"
 
 FxRow = tuple[date, str, int]
 HolidayRow = tuple[date, str, str]
@@ -34,7 +34,7 @@ class LoadCounts:
 
 def ddl() -> str:
     """The `ref` schema DDL, shipped as package data."""
-    return (files("crossfoot.db") / "sql" / DDL_FILE).read_text(encoding="utf-8")
+    return sql(REF_SQL)
 
 
 def rate_ppm(raw: str) -> int:

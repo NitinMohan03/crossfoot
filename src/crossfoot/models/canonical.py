@@ -94,6 +94,10 @@ class PartyRef(Frozen):
 
     `surface` is the source's own text and is never edited; `normalised` is
     `crossfoot.names.normalise` applied to it, so every source normalises names the one way.
+
+    `similarity` is the RapidFuzz score that identified the party, or 100 when the
+    identification was structural rather than fuzzy -- an exact name, a trivial normalisation
+    (including the bank's truncation), or a confirmed alias.
     """
 
     surface: str

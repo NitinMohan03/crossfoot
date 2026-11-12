@@ -7,5 +7,14 @@ it needs the same holiday list the generator used, not a second one.
 
 from crossfoot.db.connect import connection, database_url
 from crossfoot.db.reference import LoadCounts, load_reference
+from crossfoot.db.schema import apply_er, apply_script, sql
 
-__all__ = ["LoadCounts", "connection", "database_url", "load_reference"]
+__all__ = [
+    "LoadCounts",
+    "apply_er",
+    "apply_script",
+    "connection",
+    "database_url",
+    "load_reference",
+    "sql",
+]

@@ -1,10 +1,11 @@
-"""`python -m crossfoot.db load-reference --dir data/full` -- what `just db-ref` runs."""
+"""The `crossfoot.db` CLI: what `just db-ref` and `just db-er` run."""
 
 import argparse
 from pathlib import Path
 
 from crossfoot.db.connect import connection
 from crossfoot.db.reference import load_reference
+from crossfoot.db.schema import apply_er
 
 
 def main() -> None:
@@ -12,7 +13,14 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     load = sub.add_parser("load-reference", help="load the FX rate and bank-holiday tables")
     load.add_argument("--dir", type=Path, default=Path("data/full"), help="dataset directory")
+    sub.add_parser("apply-er", help="create the `er` schema and the alias registry table")
     args = parser.parse_args()
+
+    if args.command == "apply-er":
+        with connection() as conn:
+            apply_er(conn)
+        print("applied er.sql: er.counterparty_alias is present")
+        return
 
     with connection() as conn:
         counts = load_reference(args.dir, conn)

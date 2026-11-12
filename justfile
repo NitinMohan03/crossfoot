@@ -76,6 +76,10 @@ proc-api DIR="data/full" PORT="8099":
 db-ref DIR="data/full":
     uv run python -m crossfoot.db load-reference --dir {{DIR}}
 
+# Create the `er` schema: the alias registry (plan §2.7)
+db-er:
+    uv run python -m crossfoot.db apply-er
+
 # Load a generated ERP dump into Postgres (Phase 2 does this properly)
 db-load DIR="data/full":
     Get-Content {{DIR}}/erp.sql | docker compose exec -T db psql -U crossfoot -d crossfoot -v ON_ERROR_STOP=1
