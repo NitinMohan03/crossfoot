@@ -24,7 +24,8 @@ from crossfoot.mcp.bank.files import ReadOnlyExport
 from crossfoot.mcp.bank.parse import BankRow, PostedAt, parse_month, parse_sidecar
 from crossfoot.mcp.bank.parse import line_id as make_line_id
 from crossfoot.mcp.bank.settings import SIDECAR_NAME, BankSettings
-from crossfoot.mcp.common.errors import INVALID_ARGUMENT, LIMIT_EXCEEDED, NOT_FOUND, ToolError
+from crossfoot.mcp.common.errors import INVALID_ARGUMENT, NOT_FOUND, ToolError
+from crossfoot.mcp.common.paging import page_limit
 from crossfoot.mcp.common.parties import ErpParties, Parties
 from crossfoot.mcp.erp.tools import parse_date
 from crossfoot.models.canonical import CanonicalRecord, PartyRef
@@ -79,17 +80,9 @@ class BankService:
     # -- plumbing ---------------------------------------------------------------------------
 
     def limit(self, limit: int | None) -> int:
-        if limit is None:
-            return self.settings.default_limit
-        if limit < 1:
-            raise ToolError(INVALID_ARGUMENT, f"limit must be at least 1, got {limit}")
-        if limit > self.settings.max_limit:
-            raise ToolError(
-                LIMIT_EXCEEDED,
-                f"limit {limit} is above this server's maximum of {self.settings.max_limit}",
-                max_limit=self.settings.max_limit,
-            )
-        return limit
+        return page_limit(
+            limit, default=self.settings.default_limit, maximum=self.settings.max_limit
+        )
 
     def _month(self, month: str) -> tuple[BankRow, ...] | None:
         """One month's rows, parsed once. None when the export has no file for that month."""

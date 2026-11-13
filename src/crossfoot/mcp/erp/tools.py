@@ -15,11 +15,11 @@ from crossfoot.config import Thresholds
 from crossfoot.entities import SELECT_SQL, AliasRegistry, Candidate, NameIndex, resolve
 from crossfoot.mcp.common.errors import (
     INVALID_ARGUMENT,
-    LIMIT_EXCEEDED,
     NOT_FOUND,
     UNRESOLVED_VENDOR,
     ToolError,
 )
+from crossfoot.mcp.common.paging import page_limit
 from crossfoot.mcp.erp import canonical, queries
 from crossfoot.mcp.erp.db import ReadOnlyDatabase
 from crossfoot.mcp.erp.settings import ErpSettings
@@ -86,17 +86,9 @@ class ErpService:
         return rows
 
     def limit(self, limit: int | None) -> int:
-        if limit is None:
-            return self.settings.default_limit
-        if limit < 1:
-            raise ToolError(INVALID_ARGUMENT, f"limit must be at least 1, got {limit}")
-        if limit > self.settings.max_limit:
-            raise ToolError(
-                LIMIT_EXCEEDED,
-                f"limit {limit} is above this server's maximum of {self.settings.max_limit}",
-                max_limit=self.settings.max_limit,
-            )
-        return limit
+        return page_limit(
+            limit, default=self.settings.default_limit, maximum=self.settings.max_limit
+        )
 
     def name_index(self) -> NameIndex:
         if self._index is None:
