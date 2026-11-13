@@ -4,6 +4,8 @@
 `mcp-remittance` by reading it, so the pattern below is as much the deliverable as the server.
 `bank/` is the second application and the first over files, which is where rule 6 stops being
 about a database role: its read-only boundary is one `open` in the whole package, mode `"rb"`.
+`processor/` is the third and the first over a network service, where the boundary is the verb:
+one request in the whole package, and its method is the literal `"GET"`.
 
 **The pattern, in seven rules.**
 
@@ -34,6 +36,7 @@ about a database role: its read-only boundary is one `open` in the whole package
 
 Source access is deliberately *not* abstracted into `common/`: a Postgres role, a bearer token
 and a read-only file handle have nothing useful in common, and pretending otherwise would buy an
-interface no caller wants. `common/` holds what is genuinely shared -- the error envelope and the
-payload shape.
+interface no caller wants. `common/` holds what is genuinely shared -- the error envelope, the
+payload shape, and (since a third server needed it) the counterparty names the two payment-side
+servers resolve payer names against, which is `mcp-erp`'s own read-only access and nothing new.
 """

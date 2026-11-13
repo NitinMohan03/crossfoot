@@ -14,6 +14,10 @@
 is worth a retry, the second is not -- a bank export with a row that will not parse stays that
 way until a person looks at the file. Neither is the caller's `invalid_argument`.
 
+`unavailable` may say more about itself in its extras. `retryable: false` marks the one kind
+that waiting does not cure -- a service that refused this server's own credential -- and
+`retry_after` is the number of seconds a rate-limiting service asked to be left alone for.
+
 Errors are returned as a payload, not raised. Rule 2 in `crossfoot.mcp`: the agent needs a
 stable code to branch on, and the SDK turns an unexpected exception into "Error executing tool
 X", which tells it nothing. `guard` is that rule as a function, shared so that every server

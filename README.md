@@ -146,8 +146,9 @@ just mcp-erp             # serve the ERP over MCP on stdio
 A failed call answers with `{"error": {"code", "message"}}` — codes `not_found`,
 `invalid_argument`, `limit_exceeded`, `unresolved_vendor`, `unavailable`, `malformed_source`,
 `read_only` — rather than failing the call, because an agent on a step budget has to branch on a
-code, and an MCP error result carries only prose. `unavailable` is worth a retry;
-`malformed_source` is not, and says which file and row.
+code, and an MCP error result carries only prose. `unavailable` is worth a retry (unless it says
+`retryable: false`, as a refused credential does); `malformed_source` is not, and says which
+file and row, or which record.
 
 Read-only is enforced three times over, each independently tested: the server connects as
 `crossfoot_ro`, which holds no DML privilege; every transaction is opened read-only, so even a
@@ -196,6 +197,58 @@ ways: the advertised tools equal a read-only allowlist; the package holds exactl
 mode `"rb"`, and no call or import that changes a file (checked on the syntax tree); every tool,
 on failing paths too, leaves a locked copy of the export byte for byte and timestamp for
 timestamp as it was; and the connection the names come through refuses every write.
+
+### The processor settlement server
+
+`src/crossfoot/mcp/processor/` is a client of the mock processor API below — the first source
+that is a network service. Tools: `get_settlement`, `list_settlements` (a settlement-date
+window), `get_batch`, and the two bulk reads ingestion uses, `export_settlements` and
+`export_batches`.
+
+```bash
+just proc-api data/full 8099                 # the API, in one shell
+just mcp-processor http://127.0.0.1:8099     # the server over it, on stdio, in another
+```
+
+A settlement line becomes a payment record whose amount is the **gross**; the fee and the net
+sit in `detail`, and `fee + net == gross` is checked on every record. A foreign line's sterling
+view is its gross at the rate the processor recorded, held as integer parts per million — the
+rate arrives as the text `"1.333209"` and never passes through a float. `settled_on` stays a
+date; `created_at` becomes UTC with its original text beside it.
+
+`get_batch` is the tool the bank source needs. The bank never sees a settlement line: it sees one
+`TFR` line per batch, `PAYCO SETTLE BAT_2024-07-17_01`. Asked with that text exactly as the bank
+writes it, the server returns the batch, the lines inside it, and `payout_base_minor` — and on
+the dev slice all 268 payout lines open onto a batch whose payout is that bank line to the penny
+and to the day. Before answering, the batch is checked against itself: its lines must number its
+`count` and their nets must add up to its total. A batch is not a canonical record; it is what
+ties one bank line to many settlement lines.
+
+What the source being HTTP changes:
+
+- **Read-only is the verb.** There is no role to connect as and no file mode to pick, so the
+  package issues one request, in one module, and its method is the literal `GET` with no body.
+  That is checked on the syntax tree, then checked again on what arrives at the API and on what
+  goes over a real socket. Redirects are not followed and no proxy is used: the bearer token goes
+  to the configured host and nowhere else.
+- **The token** is read from `CROSSFOOT_PROCESSOR_TOKEN` — the same variable the API reads — and
+  has no command-line flag. It is sent in the `Authorization` header only, is left out of the
+  settings' `repr`, and never appears in an error: messages are built from the API's stable
+  code, not from its prose.
+- **A 429 is waited out, a bounded number of times.** `Retry-After` is honoured exactly, at most
+  twice per request; a longer wait than five seconds is not slept at all but handed back as
+  `unavailable` with `retry_after`, so the caller decides. Timeouts and 5xx are reported once.
+- **Every failure lands on an existing code.** A refused credential is `unavailable` with
+  `retryable: false` — no argument caused it and none fixes it. A body that is not JSON, a field
+  nobody documented, an amount written `1.0`, a line whose `fee + net` is not its gross: all
+  `malformed_source`, naming the record. A forged cursor is the caller's `invalid_argument`.
+
+Which resolver reads `payer_name` was measured rather than assumed. It is a bare name, which is
+what `resolve()` is for — and on the dev slice's 552 lines `resolve()` gets 535 right, 7 wrong
+and leaves 10 unresolved, while `resolve_description()` gets 529 right, **1** wrong and leaves
+22. Six of the seven are a payer who shortened their name to its first word, matched at a
+"perfect" 100 to another company starting with that word. The server uses the second: an
+unresolved payment goes to review, a wrong one goes into the ledger.
 
 ## Mock processor API
 
