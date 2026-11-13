@@ -88,6 +88,17 @@ db-roles:
 mcp-erp SCHEMA="erp":
     uv run python -m crossfoot.mcp.erp --schema {{SCHEMA}}
 
+# Serve the bank statement export over MCP on stdio (plan §4.4). DIR is a dataset directory;
+# payer names are resolved against the ERP's counterparties, read as the crossfoot_ro role.
+mcp-bank DIR="data/full":
+    uv run python -m crossfoot.mcp.bank --data {{DIR}}
+
+# Serve the processor settlement API over MCP on stdio (plan §4.4). URL is the API's base URL,
+# which `just proc-api` serves. The bearer token comes from CROSSFOOT_PROCESSOR_TOKEN and has no
+# argument here: a command line is visible to anything that can list processes.
+mcp-processor URL="http://127.0.0.1:8099":
+    uv run python -m crossfoot.mcp.processor --url {{URL}}
+
 # Load a generated ERP dump into Postgres. The dump drops schema `erp`, which takes the
 # read-only role's grants with it, so they are re-applied here -- without this the no-write
 # test would pass for the wrong reason.

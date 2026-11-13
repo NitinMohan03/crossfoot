@@ -67,6 +67,23 @@ def sort_similarity(left: str, right: str) -> int:
     return round(score)
 
 
+def ordered_similarity(left: str, right: str) -> int:
+    """RapidFuzz plain `ratio` over normalised names, 0-100: order kept, nothing sorted.
+
+    The second companion to `similarity`, for a field that is read left to right. Neither token
+    metric is safe on its own there: `token_set_ratio` is 100 for any subset, so one shared
+    leading word passes, and `token_sort_ratio` re-orders the tokens first, so a typo in a
+    name's first letter can move that token past its neighbour and make `PAZRICK FABRICATION`
+    look nearer `GARRICK FABRICATION` than the equally distant `CARRICK FABRICATION`. A bank
+    description does not re-order a payer's name, so the plain ratio is the honest measure of
+    how much of it survived.
+    """
+    score: object = fuzz.ratio(normalise(left), normalise(right))
+    if not isinstance(score, (int, float)):
+        raise TypeError(f"ratio returned {type(score).__name__}")
+    return round(score)
+
+
 def best_similarity(candidates: Iterable[str], surface: str) -> int:
     """The highest similarity of `surface` against any of `candidates` (legal, trading, ...)."""
     return max((similarity(candidate, surface) for candidate in candidates), default=0)

@@ -1,21 +1,21 @@
 """Registration, serialisation, and nothing else. Rule 1.
 
-Every tool here is three lines: call the service, turn the result into a payload, and hand a
-`ToolError` back in the envelope. There is no logic to test at this layer, which is why one
-integration test over real stdio is enough and the tool tests talk to `ErpService` directly.
+Every tool here is three lines: call the service, turn the result into a payload, and let
+`common.guard` hand a `ToolError` back in the envelope. There is no logic to test at this layer,
+which is why one integration test over real stdio is enough and the tool tests talk to
+`ErpService` directly.
 
 Every tool is annotated `readOnlyHint=True`, and `TOOL_NAMES` is the allowlist
 `tests/test_mcp/test_no_write.py` compares the advertised list against: a tool that writes
 cannot be added here without that test failing.
 """
 
-from collections.abc import Callable
-from typing import Any, Final
+from typing import Final
 
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-from crossfoot.mcp.common.errors import ToolError
+from crossfoot.mcp.common.errors import Payload, guard
 from crossfoot.mcp.common.results import party_payload, record_payload, records_payload
 from crossfoot.mcp.erp.settings import ErpSettings
 from crossfoot.mcp.erp.tools import NO_STATUS_NOTE, ErpService
@@ -44,16 +44,6 @@ INSTRUCTIONS: Final = (
     "the call, so branch on `code`."
 )
 
-Payload = dict[str, Any]
-
-
-def _guard(call: Callable[[], Payload]) -> Payload:
-    """Run a tool body, returning the error envelope instead of raising (rule 2)."""
-    try:
-        return call()
-    except ToolError as exc:
-        return exc.payload()
-
 
 def build_server(
     settings: ErpSettings | None = None, service: ErpService | None = None
@@ -70,7 +60,7 @@ def build_server(
     @server.tool(annotations=READ_ONLY)
     def get_invoice(ref: str) -> Payload:
         """One invoice by ERP ref, e.g. `INV-2024-0891`."""
-        return _guard(lambda: record_payload(erp.get_invoice(ref)))
+        return guard(lambda: record_payload(erp.get_invoice(ref)))
 
     @server.tool(annotations=READ_ONLY)
     def list_open_invoices(
@@ -105,7 +95,7 @@ def build_server(
                 extra["party"] = party.model_dump(mode="json", exclude_none=True)
             return records_payload(records, **extra)
 
-        return _guard(body)
+        return guard(body)
 
     @server.tool(annotations=READ_ONLY)
     def get_credit_notes(vendor: str, limit: int | None = None) -> Payload:
@@ -115,7 +105,7 @@ def build_server(
             records, party = erp.get_credit_notes(vendor, limit=limit)
             return records_payload(records, party=party.model_dump(mode="json", exclude_none=True))
 
-        return _guard(body)
+        return guard(body)
 
     @server.tool(annotations=READ_ONLY)
     def lookup_alias(name: str) -> Payload:
@@ -124,7 +114,7 @@ def build_server(
         `method` is exact, normalised, alias, fuzzy or unresolved. The registry is frozen: this
         tool never records anything, and an alias is learned only from a confirmed escalation.
         """
-        return _guard(
+        return guard(
             lambda: party_payload(
                 erp.lookup_alias(name),
                 registry_available=erp.registry_available,
@@ -141,7 +131,7 @@ def build_server(
             last = records[-1].reference if records else None
             return records_payload(records, next_after_ref=last)
 
-        return _guard(body)
+        return guard(body)
 
     return server
 

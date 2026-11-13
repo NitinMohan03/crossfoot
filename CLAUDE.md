@@ -12,7 +12,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   MCP servers connect as. `just db-load` re-applies the grants, because the ERP dump drops its
   schema and takes them with it.
 - `just mcp-erp` serves the ERP over MCP on stdio.
+- `just mcp-bank data/full` serves the bank CSV export over MCP on stdio. It needs the DB too:
+  payer names are resolved against the ERP's counterparties.
 - `just proc-api data/full 8099` serves the mock payment processor REST API.
+- `just mcp-processor http://127.0.0.1:8099` serves that API over MCP on stdio. It needs the API
+  running and the DB (payer names resolve against the ERP). Token: `CROSSFOOT_PROCESSOR_TOKEN`.
 - Eval/cost recipes do not exist yet — added per phase in `reconciliation-agent-plan.md` Part 4.
 
 # Architecture
