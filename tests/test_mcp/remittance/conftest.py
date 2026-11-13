@@ -25,13 +25,18 @@ from typing import Any
 import pytest
 
 from crossfoot.config import HELD_OUT_TEMPLATE
+from crossfoot.entities import Candidate, NameIndex, resolve_description
 from crossfoot.generate.emit import remit_pdf
 from crossfoot.generate.read import read_erp, read_manifest, read_remit
 from crossfoot.generate.records import RemitLine, Remittance
+from crossfoot.mcp.common.parties import StaticParties
+from crossfoot.mcp.remittance.canonical import CURRENCY_OF, advice_record
 from crossfoot.mcp.remittance.files import ReadOnlyAdvices
+from crossfoot.mcp.remittance.fx import Rates, parse_rates
 from crossfoot.mcp.remittance.layout import Page, Row, read_pages
 from crossfoot.mcp.remittance.parse import Advice, parse_advice
 from crossfoot.mcp.remittance.settings import FX_FILE, MAX_BYTES, MAX_PAGES, REMIT_SUBDIR
+from crossfoot.models.canonical import CanonicalRecord
 from tests.test_mcp.conftest import DEV_SLICE
 
 REMIT_DIR = DEV_SLICE / REMIT_SUBDIR
@@ -228,4 +233,45 @@ def currency_of(group_of: dict[str, dict[str, Any]]) -> dict[str, str]:
         }
         assert len(currencies) == 1, remit_id
         out[remit_id] = currencies.pop()
+    return out
+
+
+@pytest.fixture(scope="session")
+def static_parties() -> StaticParties:
+    """The slice's counterparties read from its dump, not from Postgres."""
+    erp = read_erp(DEV_SLICE / "erp.sql")
+    return StaticParties(
+        NameIndex(
+            Candidate(counterparty_id=cp.id, legal_name=cp.legal_name, trading_name=cp.trading_name)
+            for cp in erp.counterparties
+        )
+    )
+
+
+@pytest.fixture(scope="session")
+def rates(advices: ReadOnlyAdvices) -> Rates:
+    """The slice's daily rate table, as the server reads it."""
+    text = advices.fx_text()
+    assert text is not None
+    return parse_rates(FX_FILE, text)
+
+
+@pytest.fixture(scope="session")
+def records(
+    parsed: dict[str, Advice], static_parties: StaticParties, rates: Rates
+) -> dict[str, CanonicalRecord]:
+    """Every developed advice as a canonical record, keyed by record id.
+
+    Built with the mapper and the resolver directly -- no service -- so a mapping test fails on
+    the mapping and not on the tool around it.
+    """
+    out: dict[str, CanonicalRecord] = {}
+    for advice in parsed.values():
+        party = resolve_description(
+            advice.payer, static_parties.name_index(), static_parties.registry()
+        )
+        currency = CURRENCY_OF[advice.symbol]
+        rate = None if currency == "GBP" else rates[(advice.paid_on, currency)]
+        record = advice_record(advice, party, rate)
+        out[record.record_id] = record
     return out
