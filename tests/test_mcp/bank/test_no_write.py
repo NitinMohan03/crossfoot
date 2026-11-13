@@ -28,9 +28,9 @@ from mcp import Client
 
 import crossfoot.mcp.bank
 from crossfoot.mcp.bank import BankService, BankSettings, build_server
-from crossfoot.mcp.bank.parties import ErpParties, StaticParties
 from crossfoot.mcp.bank.server import TOOL_NAMES
 from crossfoot.mcp.common.errors import READ_ONLY, ToolError
+from crossfoot.mcp.common.parties import ErpParties, StaticParties
 from crossfoot.mcp.erp.db import ReadOnlyDatabase
 from tests.test_mcp.bank.conftest import BANK_DIR, LINES, NO_DATABASE
 from tests.test_mcp.conftest import COUNTERPARTIES

@@ -2,7 +2,7 @@
 
 Two sources are named here because the server reads two: the bank export itself, which is
 files, and the counterparty list its descriptions are resolved against, which lives in the ERP
-(see `parties.py` for why that is Postgres and not a copy on disk).
+(see `mcp/common/parties.py` for why that is Postgres and not a copy on disk).
 """
 
 import os

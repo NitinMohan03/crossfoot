@@ -1,25 +1,30 @@
-"""Where the bank server gets the counterparties its descriptions are resolved against.
+"""Where a payment-side server gets the counterparties its payer names are resolved against.
 
-A bank statement names payers; it does not know who the business's counterparties are. That
-list is the ERP's, and the confirmed aliases are `er.counterparty_alias`, both in Postgres. So
-this server reads files for its records and asks Postgres for exactly two things: the
-counterparty names and the alias registry.
+A bank statement and a processor settlement both name payers; neither knows who the business's
+counterparties are. That list is the ERP's, and the confirmed aliases are
+`er.counterparty_alias`, both in Postgres. So such a server reads its own source for its records
+and asks Postgres for exactly two things: the counterparty names and the alias registry.
 
-**Why not a copy of the names on disk beside the CSVs?** Because it would be a second source of
-truth. With one list, a bank line's `party` and `mcp-erp`'s `lookup_alias` on the same text
-cannot disagree -- they ran the same resolver over the same rows. A file-side copy would be
-right until the day someone reloaded one and not the other, and nothing would say so.
+**Why not a copy of the names beside each source?** Because it would be a second source of
+truth. With one list, a bank line's `party`, a settlement line's `party` and `mcp-erp`'s
+`lookup_alias` on the same text cannot disagree -- they ran the same resolver over the same
+rows. A copy would be right until the day someone reloaded one and not the other, and nothing
+would say so.
 
 The access is `mcp-erp`'s own: the `crossfoot_ro` role, read-only transactions, the registry
 constructed frozen. Nothing new can write, and nothing here learns.
 
 **When Postgres is not there, the call fails** with `unavailable`. The alternative -- serving the
-lines with every party unresolved -- would look like an answer. Ingestion would store it, and a
+records with every party unresolved -- would look like an answer. Ingestion would store it, and a
 few thousand payments would then read as coming from nobody.
 
-`Parties` is a protocol so the parsing and failure tests can hand the service a fixed index and
-run without a database. `mcp-processor` will be the third thing to need these names; that is the
-point at which this belongs in `common/`, and not before.
+`Parties` is a protocol so the parsing and failure tests can hand a service a fixed index and
+run without a database.
+
+This module began as `bank/parties.py` and moved here when `mcp-processor` became the third
+server to need the names (`mcp-erp` loads them for its own queries). It is the one thing in
+`common/` that reaches a source, and it is deliberately not re-exported from the package: it
+imports `mcp.erp`, which imports `common`.
 """
 
 from typing import Any, Protocol

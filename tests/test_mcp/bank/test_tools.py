@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime
 import pytest
 
 from crossfoot.mcp.bank import BankService
-from crossfoot.mcp.bank.parties import StaticParties
+from crossfoot.mcp.common.parties import StaticParties
 from crossfoot.models.canonical import BankDetail, CanonicalRecord
 from tests.test_mcp.bank.conftest import BY_TYPE, LINES
 from tests.test_mcp.conftest import COUNTERPARTIES

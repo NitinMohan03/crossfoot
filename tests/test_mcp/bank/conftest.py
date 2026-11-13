@@ -26,8 +26,8 @@ from crossfoot.generate.read import read_erp
 from crossfoot.mcp.bank import BankService, BankSettings
 from crossfoot.mcp.bank.files import ReadOnlyExport
 from crossfoot.mcp.bank.parse import BankRow, PostedAt, parse_month, parse_sidecar
-from crossfoot.mcp.bank.parties import StaticParties
 from crossfoot.mcp.bank.settings import SIDECAR_NAME
+from crossfoot.mcp.common.parties import StaticParties
 from tests.test_mcp.conftest import DEV_SLICE
 
 BANK_DIR = DEV_SLICE / "bank"
