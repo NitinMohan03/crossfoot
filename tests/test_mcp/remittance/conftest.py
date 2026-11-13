@@ -17,7 +17,7 @@ The slice is ground truth and is only ever read. Tests that need a damaged advic
 
 import dataclasses
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -25,11 +25,13 @@ from typing import Any
 import pytest
 
 from crossfoot.config import HELD_OUT_TEMPLATE
+from crossfoot.db.connect import readonly_database_url
 from crossfoot.entities import Candidate, NameIndex, resolve_description
 from crossfoot.generate.emit import remit_pdf
 from crossfoot.generate.read import read_erp, read_manifest, read_remit
 from crossfoot.generate.records import RemitLine, Remittance
-from crossfoot.mcp.common.parties import StaticParties
+from crossfoot.mcp.common.parties import Parties, StaticParties
+from crossfoot.mcp.remittance import RemittanceService, RemittanceSettings
 from crossfoot.mcp.remittance.canonical import CURRENCY_OF, advice_record
 from crossfoot.mcp.remittance.files import ReadOnlyAdvices
 from crossfoot.mcp.remittance.fx import Rates, parse_rates
@@ -53,6 +55,12 @@ FOREIGN_DEVELOPED = {"EUR": 20, "USD": 15}
 
 #: The advice most synthetic tests start from.
 SAMPLE_REF = "PAY-2024-0088"
+#: Five developed advices that between them use every developed layout and one foreign
+#: currency: the dataset the failure tests break.
+SMALL = ("PAY-2024-0001", "PAY-2024-0002", "PAY-2024-0003", "PAY-2024-0004", "PAY-2024-0027")
+
+#: A DSN nothing listens on, for a service that must never reach for the database.
+NO_DATABASE = "postgresql://crossfoot_ro:crossfoot_ro@127.0.0.1:1/crossfoot"
 SAMPLE_NAME = f"{SAMPLE_REF}.pdf"
 SAMPLE_LINES = (
     RemitLine("INV-2024-0891", 441700),
@@ -275,3 +283,64 @@ def records(
         record = advice_record(advice, party, rate)
         out[record.record_id] = record
     return out
+
+
+@pytest.fixture(scope="session")
+def offline(developed_dir: Path, static_parties: StaticParties) -> RemittanceService:
+    """The developed advices with a fixed name index: no database is touched.
+
+    Session-scoped on purpose. A service parses each advice once and keeps it, and nothing a
+    tool does changes what a later call sees, so the tool tests share one and pay for the 444
+    parses once. Tests about the remembering itself build their own.
+    """
+    return RemittanceService(
+        RemittanceSettings(data_dir=developed_dir, dsn=NO_DATABASE), parties=static_parties
+    )
+
+
+Builder = Callable[..., RemittanceService]
+
+
+@pytest.fixture
+def broken(tmp_path: Path, static_parties: StaticParties) -> Builder:
+    """A service over a small private dataset, with files replaced, added or removed.
+
+    It starts as `SMALL` -- five developed advices and the rate table. `broken(**{"PAY-2024-
+    0004.pdf": b"..."})` overwrites or adds a file; a value of None deletes one. The dataset
+    lives in `tmp_path`; the committed slice is never written to.
+    """
+
+    def build(parties: Parties | None = None, **files: bytes | None) -> RemittanceService:
+        target = tmp_path / "data"
+        (target / REMIT_SUBDIR).mkdir(parents=True)
+        for ref in SMALL:
+            shutil.copyfile(REMIT_DIR / f"{ref}.pdf", target / REMIT_SUBDIR / f"{ref}.pdf")
+        shutil.copyfile(DEV_SLICE / FX_FILE, target / FX_FILE)
+        for name, content in files.items():
+            path = target / name if name == FX_FILE else target / REMIT_SUBDIR / name
+            if content is None:
+                path.unlink()
+            else:
+                path.write_bytes(content)
+        return RemittanceService(
+            RemittanceSettings(data_dir=target, dsn=NO_DATABASE), parties=parties or static_parties
+        )
+
+    return build
+
+
+@pytest.fixture(scope="session")
+def remittance_settings(erp_schema: str, developed_dir: Path) -> RemittanceSettings:
+    """The server's real configuration: the developed advices, and names from `erp_test`."""
+    return RemittanceSettings(
+        data_dir=developed_dir, dsn=readonly_database_url(), erp_schema=erp_schema
+    )
+
+
+@pytest.fixture
+def remittance(remittance_settings: RemittanceSettings) -> Iterator[RemittanceService]:
+    service = RemittanceService(remittance_settings)
+    try:
+        yield service
+    finally:
+        service.close()
