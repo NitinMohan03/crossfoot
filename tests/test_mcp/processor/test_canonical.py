@@ -28,6 +28,7 @@ from tests.test_mcp.processor.conftest import (
     SETTLEMENTS,
     USD_ID,
     WITH_REFERENCE,
+    detail,
     raw_lines,
 )
 
@@ -85,21 +86,20 @@ def test_every_line_becomes_a_processor_payment_with_its_own_id(
     # Spec 01 §5.3 ids, unchanged: ground truth knows every one, and no other.
     assert {record.record_id for record in records} == manifest_proc_ids
     assert Counter(record.amount.currency for record in records) == BY_CURRENCY
-    assert Counter(record.detail.product for record in records) == BY_PRODUCT  # type: ignore[union-attr]
+    assert Counter(detail(record).product for record in records) == BY_PRODUCT
 
 
 def test_the_amount_is_the_gross_and_fee_plus_net_make_it(
     lines: list[SettlementLine], records: list[CanonicalRecord]
 ) -> None:
     for line, record in zip(lines, records, strict=True):
-        detail = record.detail
-        assert detail.kind == "processor"
+        inside = detail(record)
         assert record.amount.minor == line.gross_minor > 0
-        assert (detail.fee_minor, detail.net_minor) == (line.fee_minor, line.net_minor)
-        assert detail.fee_minor + detail.net_minor == record.amount.minor
-        assert detail.batch_id == line.batch_id
+        assert (inside.fee_minor, inside.net_minor) == (line.fee_minor, line.net_minor)
+        assert inside.fee_minor + inside.net_minor == record.amount.minor
+        assert inside.batch_id == line.batch_id
         # Only a card payment is charged a fee (spec 01 §3.3).
-        assert (detail.fee_minor > 0) == (detail.product == "card")
+        assert (inside.fee_minor > 0) == (inside.product == "card")
 
 
 def test_a_sterling_line_is_its_own_base_amount(records: list[CanonicalRecord]) -> None:

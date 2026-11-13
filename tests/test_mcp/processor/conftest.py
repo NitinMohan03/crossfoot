@@ -13,7 +13,13 @@ The slice is ground truth and is only ever read.
 """
 
 import json
+import os
+import socket
+import subprocess
+import sys
 import threading
+import time
+import urllib.request
 from collections.abc import Iterator, Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, NamedTuple
@@ -21,12 +27,16 @@ from typing import Any, NamedTuple
 import pytest
 from fastapi.testclient import TestClient
 
+from crossfoot.db.connect import readonly_database_url
 from crossfoot.entities import Candidate, NameIndex
 from crossfoot.generate.read import read_erp
-from crossfoot.mcp.common.parties import StaticParties
-from crossfoot.mcp.processor.http import Reply, SourceDown
-from crossfoot.mcp.processor.settings import ProcessorSettings
+from crossfoot.mcp.common.parties import Parties, StaticParties
+from crossfoot.mcp.processor import ProcessorService
+from crossfoot.mcp.processor.client import ProcessorApi
+from crossfoot.mcp.processor.http import Reply, SourceDown, Transport
+from crossfoot.mcp.processor.settings import TOKEN_ENV, ProcessorSettings
 from crossfoot.mock_processor import ApiSettings, create_app
+from crossfoot.models.canonical import CanonicalRecord, ProcessorDetail
 from tests.test_mcp.conftest import DEV_SLICE
 
 PROCESSOR_DIR = DEV_SLICE / "processor"
@@ -60,6 +70,12 @@ def api_order(name: str, date_field: str) -> list[str]:
     return sorted(
         raw_lines(name), key=lambda line: (json.loads(line)[date_field], json.loads(line)["id"])
     )
+
+
+def detail(record: CanonicalRecord) -> ProcessorDetail:
+    """A record's processor detail, with the type narrowed for the assertions that read it."""
+    assert isinstance(record.detail, ProcessorDetail)
+    return record.detail
 
 
 class FakeClock:
@@ -234,6 +250,97 @@ def stub() -> Iterator[Stub]:
         yield server
     finally:
         server.close()
+
+
+# -- the service ------------------------------------------------------------------------------
+
+
+def service_over(
+    transport: Transport,
+    parties: Parties | None,
+    clock: FakeClock | None = None,
+    **overrides: Any,
+) -> ProcessorService:
+    """A service whose API client talks to `transport`. With `parties=None`, names are Postgres."""
+    settings = client_settings(**overrides)
+    sleep = (clock or FakeClock()).sleep
+    return ProcessorService(settings, parties=parties, api=ProcessorApi(settings, transport, sleep))
+
+
+@pytest.fixture
+def offline(transport: AppTransport, static_parties: StaticParties) -> ProcessorService:
+    """The dev slice behind the real API, with a fixed name index: no socket, no database."""
+    return service_over(transport, static_parties)
+
+
+@pytest.fixture(scope="session")
+def processor_settings(erp_schema: str) -> ProcessorSettings:
+    """The server's real configuration for names: the read-only role and `erp_test`."""
+    return client_settings(dsn=readonly_database_url(), erp_schema=erp_schema)
+
+
+@pytest.fixture
+def processor(
+    processor_settings: ProcessorSettings, transport: AppTransport
+) -> Iterator[ProcessorService]:
+    """The service as it runs: the API for records, Postgres for names."""
+    service = ProcessorService(
+        processor_settings, api=ProcessorApi(processor_settings, transport, FakeClock().sleep)
+    )
+    try:
+        yield service
+    finally:
+        service.close()
+
+
+# -- the mock API as a real process ----------------------------------------------------------
+
+
+def free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def _healthy(url: str) -> bool:
+    try:
+        with urllib.request.urlopen(f"{url}/healthz", timeout=1) as response:
+            return bool(response.status == 200)
+    except OSError:
+        return False
+
+
+@pytest.fixture(scope="session")
+def live_api() -> Iterator[str]:
+    """`python -m crossfoot.mock_processor` over the dev slice, on a free port. Yields its URL."""
+    port = free_port()
+    url = f"http://127.0.0.1:{port}"
+    env = dict(os.environ)
+    env[TOKEN_ENV] = TOKEN
+    command = [sys.executable, "-m", "crossfoot.mock_processor"]
+    command += ["--data", str(DEV_SLICE), "--port", str(port)]
+    process = subprocess.Popen(
+        command,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        deadline = time.monotonic() + 30
+        while not _healthy(url):
+            if process.poll() is not None:
+                raise AssertionError(f"the mock API exited with {process.returncode}")
+            if time.monotonic() > deadline:
+                raise AssertionError("the mock API did not come up within 30s")
+            time.sleep(0.1)
+        yield url
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
 
 
 # -- names, and ground truth -----------------------------------------------------------------
