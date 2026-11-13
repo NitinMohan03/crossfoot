@@ -2,6 +2,8 @@
 
 `erp/` is the reference implementation. Sessions 2.2-2.4 build `mcp-bank`, `mcp-processor` and
 `mcp-remittance` by reading it, so the pattern below is as much the deliverable as the server.
+`bank/` is the second application and the first over files, which is where rule 6 stops being
+about a database role: its read-only boundary is one `open` in the whole package, mode `"rb"`.
 
 **The pattern, in seven rules.**
 

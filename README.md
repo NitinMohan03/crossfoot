@@ -144,9 +144,10 @@ just mcp-erp             # serve the ERP over MCP on stdio
 ```
 
 A failed call answers with `{"error": {"code", "message"}}` — codes `not_found`,
-`invalid_argument`, `limit_exceeded`, `unresolved_vendor`, `unavailable`, `read_only` — rather
-than failing the call, because an agent on a step budget has to branch on a code, and an MCP
-error result carries only prose.
+`invalid_argument`, `limit_exceeded`, `unresolved_vendor`, `unavailable`, `malformed_source`,
+`read_only` — rather than failing the call, because an agent on a step budget has to branch on a
+code, and an MCP error result carries only prose. `unavailable` is worth a retry;
+`malformed_source` is not, and says which file and row.
 
 Read-only is enforced three times over, each independently tested: the server connects as
 `crossfoot_ro`, which holds no DML privilege; every transaction is opened read-only, so even a
@@ -154,6 +155,47 @@ DSN pointing at the owner refuses a write; and the advertised tool list is asser
 read-only allowlist. Note that `erp.sql` begins with `DROP SCHEMA IF EXISTS erp CASCADE`, which
 takes the grants with it — `just db-load` re-applies them, and without that the no-write test
 would pass for the wrong reason.
+
+### The bank statement server
+
+`src/crossfoot/mcp/bank/` serves the monthly bank CSVs. Tools: `get_bank_line`,
+`find_bank_lines` (a signed amount window and/or a value-date window) and `export_bank_lines`
+(the bulk read ingestion uses).
+
+```bash
+just mcp-bank data/full   # serve <DIR>/bank over MCP on stdio
+```
+
+The plan calls this source "fixed-width/CSV, encoding quirks". What the generator emits is plain
+comma-separated CSV — no fixed-width columns, no quoting, pure ASCII, CRLF — so that is what is
+parsed, and no parser was written for a format nothing produces. The quirks are handled where
+they are real, on the way in: bytes that are not UTF-8 are a coded error rather than mojibake,
+and a byte-order mark or LF line endings are read as what they are.
+
+Everything that could move money or an id is strict. A bank line's id is its position —
+`bank:YYYY-MM-DD:NNNNNN` is the value date and the row number in its month file — so a row that
+will not parse is never skipped: skipping would hide a payment and renumber every line after it.
+The running balance is checked row to row as the file's own checksum of that order. One bad
+month fails the calls that touch it; the others keep answering.
+
+This source is the project's test of the timezone position. `Transaction Date` is the value
+date, a calendar date, and reaches `record_date` untouched. The posting moment comes from the
+`posted_at.jsonl` sidecar in `Europe/London` local time, and is converted to UTC by the offset
+it carries, with the original text kept. The dev slice straddles both clock changes:
+`bank:2024-04-02:000003` was posted at `2024-04-02T00:02:00+01:00`, which is 23:02 UTC on the
+**1st**, and its value date is still the 2nd. Thirty lines in the slice are like that. Had the
+date been converted along with the timestamp, thirty payments would sit on the wrong day.
+
+Payer names are resolved against the ERP's counterparties, read from Postgres through the same
+read-only role — not from a copy on disk, which would be a second source of truth. If the
+database is down the call answers `unavailable` instead of serving every line as coming from
+nobody. Processor payout lines (`TFR`) are not resolved at all: the payer is the processor.
+
+A directory has no role that cannot write, so read-only is drawn differently and tested four
+ways: the advertised tools equal a read-only allowlist; the package holds exactly one `open`,
+mode `"rb"`, and no call or import that changes a file (checked on the syntax tree); every tool,
+on failing paths too, leaves a locked copy of the export byte for byte and timestamp for
+timestamp as it was; and the connection the names come through refuses every write.
 
 ## Mock processor API
 

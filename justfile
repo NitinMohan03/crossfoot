@@ -88,6 +88,11 @@ db-roles:
 mcp-erp SCHEMA="erp":
     uv run python -m crossfoot.mcp.erp --schema {{SCHEMA}}
 
+# Serve the bank statement export over MCP on stdio (plan §4.4). DIR is a dataset directory;
+# payer names are resolved against the ERP's counterparties, read as the crossfoot_ro role.
+mcp-bank DIR="data/full":
+    uv run python -m crossfoot.mcp.bank --data {{DIR}}
+
 # Load a generated ERP dump into Postgres. The dump drops schema `erp`, which takes the
 # read-only role's grants with it, so they are re-applied here -- without this the no-write
 # test would pass for the wrong reason.
