@@ -21,6 +21,9 @@ from typing import Any, NamedTuple
 import pytest
 from fastapi.testclient import TestClient
 
+from crossfoot.entities import Candidate, NameIndex
+from crossfoot.generate.read import read_erp
+from crossfoot.mcp.common.parties import StaticParties
 from crossfoot.mcp.processor.http import Reply, SourceDown
 from crossfoot.mcp.processor.settings import ProcessorSettings
 from crossfoot.mock_processor import ApiSettings, create_app
@@ -231,3 +234,31 @@ def stub() -> Iterator[Stub]:
         yield server
     finally:
         server.close()
+
+
+# -- names, and ground truth -----------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def static_parties() -> StaticParties:
+    """The slice's counterparties read from its dump, not from Postgres."""
+    erp = read_erp(DEV_SLICE / "erp.sql")
+    return StaticParties(
+        NameIndex(
+            Candidate(counterparty_id=cp.id, legal_name=cp.legal_name, trading_name=cp.trading_name)
+            for cp in erp.counterparties
+        )
+    )
+
+
+@pytest.fixture(scope="session")
+def manifest_proc_ids() -> set[str]:
+    """Every `proc:` id the ground-truth manifest knows (spec 01 §5.3)."""
+    ids: set[str] = set()
+    with (DEV_SLICE / "manifest.jsonl").open(encoding="utf-8") as handle:
+        next(handle)  # the header line
+        for line in handle:
+            group = json.loads(line)
+            for key in ("source_ids", "target_ids", "evidence_ids"):
+                ids.update(value for value in group.get(key, []) if value.startswith("proc:"))
+    return ids
