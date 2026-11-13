@@ -15,11 +15,16 @@ import pytest
 
 from crossfoot.db.connect import RO_PASSWORD, RO_USER, database_url, readonly_database_url
 from crossfoot.db.roles import apply_roles
-from crossfoot.db.schema import apply_er
+from crossfoot.db.schema import REF_SQL, apply_er, apply_script
 
 
 @pytest.fixture(scope="module")
 def granted(conn: psycopg.Connection[Any]) -> list[str]:
+    # Both schemas are created here, not assumed. On a database nothing has touched yet -- CI's,
+    # every run -- `ref` only exists once `test_reference_load.py` has run, and that file sorts
+    # after this one. The script is idempotent and loads no rows, so a developer's tables are
+    # left as they were.
+    apply_script(REF_SQL, conn)
     apply_er(conn)
     return apply_roles(conn)
 
