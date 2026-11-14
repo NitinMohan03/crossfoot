@@ -46,9 +46,6 @@ def test_a_limit_above_the_maximum_says_what_the_maximum_is() -> None:
 def test_every_service_uses_the_shared_check_and_keeps_no_copy() -> None:
     for name in SERVICES:
         path = MCP / name / "tools.py"
-        if not path.exists():
-            # `remittance` arrives later in the same session; the loop then covers it unchanged.
-            continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         calls = [
             node

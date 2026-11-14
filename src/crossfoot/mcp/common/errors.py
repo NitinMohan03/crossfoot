@@ -12,7 +12,9 @@
 
 `unavailable` and `malformed_source` are different problems with different remedies: the first
 is worth a retry, the second is not -- a bank export with a row that will not parse stays that
-way until a person looks at the file. Neither is the caller's `invalid_argument`.
+way until a person looks at the file. Neither is the caller's `invalid_argument`. A
+`malformed_source` says where it stopped in its extras: `file` and `row` for a statement,
+`record` for a settlement line, `file`, `page` and `row` for a remittance advice.
 
 `unavailable` may say more about itself in its extras. `retryable: false` marks the one kind
 that waiting does not cure -- a service that refused this server's own credential -- and
