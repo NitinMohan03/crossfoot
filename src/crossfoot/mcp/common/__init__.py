@@ -1,4 +1,4 @@
-"""What the servers genuinely share: the error envelope and the payload shape."""
+"""What the servers genuinely share: the error envelope, the payload shape, the page-size check."""
 
 from crossfoot.mcp.common.errors import (
     ERROR_CODES,
@@ -13,6 +13,7 @@ from crossfoot.mcp.common.errors import (
     ToolError,
     guard,
 )
+from crossfoot.mcp.common.paging import page_limit
 from crossfoot.mcp.common.results import party_payload, record_payload, records_payload
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "Payload",
     "ToolError",
     "guard",
+    "page_limit",
     "party_payload",
     "record_payload",
     "records_payload",

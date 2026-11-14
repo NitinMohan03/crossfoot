@@ -6,6 +6,10 @@
 about a database role: its read-only boundary is one `open` in the whole package, mode `"rb"`.
 `processor/` is the third and the first over a network service, where the boundary is the verb:
 one request in the whole package, and its method is the literal `"GET"`.
+`remittance/` is the fourth and last, over PDFs. Its boundary is the bank's -- one `open`, mode
+`"rb"`, with the PDF library handed bytes and never a path -- and it adds a second one of its
+own: the directory it reads also holds the generator's answers for every advice, and nothing in
+the package may read them, because that is what its parser is graded against.
 
 **The pattern, in seven rules.**
 
@@ -37,6 +41,7 @@ one request in the whole package, and its method is the literal `"GET"`.
 Source access is deliberately *not* abstracted into `common/`: a Postgres role, a bearer token
 and a read-only file handle have nothing useful in common, and pretending otherwise would buy an
 interface no caller wants. `common/` holds what is genuinely shared -- the error envelope, the
-payload shape, and (since a third server needed it) the counterparty names the two payment-side
-servers resolve payer names against, which is `mcp-erp`'s own read-only access and nothing new.
+payload shape, the page-size check (hoisted when the fourth server would have made a fourth
+copy), and (since a third server needed it) the counterparty names the payment-side servers
+resolve payer names against, which is `mcp-erp`'s own read-only access and nothing new.
 """

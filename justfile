@@ -99,6 +99,12 @@ mcp-bank DIR="data/full":
 mcp-processor URL="http://127.0.0.1:8099":
     uv run python -m crossfoot.mcp.processor --url {{URL}}
 
+# Serve the remittance advice PDFs over MCP on stdio (plan §4.4). DIR is a dataset directory
+# holding `remit/`; payer names are resolved against the ERP's counterparties, read as the
+# crossfoot_ro role. Advices in a layout the parser does not know answer `malformed_source`.
+mcp-remittance DIR="data/full":
+    uv run python -m crossfoot.mcp.remittance --data {{DIR}}
+
 # Load a generated ERP dump into Postgres. The dump drops schema `erp`, which takes the
 # read-only role's grants with it, so they are re-applied here -- without this the no-write
 # test would pass for the wrong reason.

@@ -24,6 +24,10 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "mcp>=2.3.0",
     "pydantic>=2.14.2",
+    # `mcp-remittance` only: reads the advice PDFs as positioned text runs, in one module
+    # (`mcp/remittance/layout.py`). Not pinned exactly: unlike reportlab it writes no bytes that
+    # are committed, and the parse tests compare every field with ground truth on any version.
+    "pdfplumber>=0.11",
 ]
 
 [dependency-groups]

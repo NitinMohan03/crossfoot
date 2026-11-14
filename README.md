@@ -148,7 +148,11 @@ A failed call answers with `{"error": {"code", "message"}}` — codes `not_found
 `read_only` — rather than failing the call, because an agent on a step budget has to branch on a
 code, and an MCP error result carries only prose. `unavailable` is worth a retry (unless it says
 `retryable: false`, as a refused credential does); `malformed_source` is not, and says which
-file and row, or which record.
+file and row, which record, or which file, page and row of a PDF.
+
+The page-size check on every `limit` argument is one function, `mcp/common/paging.py`, used by
+all four servers: a `limit` below 1 is `invalid_argument`, one above the server's maximum is
+`limit_exceeded` and carries `max_limit`.
 
 Read-only is enforced three times over, each independently tested: the server connects as
 `crossfoot_ro`, which holds no DML privilege; every transaction is opened read-only, so even a
@@ -249,6 +253,109 @@ and leaves 10 unresolved, while `resolve_description()` gets 529 right, **1** wr
 22. Six of the seven are a payer who shortened their name to its first word, matched at a
 "perfect" 100 to another company starting with that word. The server uses the second: an
 unresolved payment goes to review, a wrong one goes into the ledger.
+
+### The remittance advice server
+
+`src/crossfoot/mcp/remittance/` serves the remittance advice PDFs — the fourth and last source.
+Tools: `get_remittance_for_payment` (by payment reference, `PAY-2024-0088`),
+`get_remittance_lines` (by id, `remit:RA-2024-0088`) and `export_remittances` (the bulk read
+ingestion uses).
+
+```bash
+just mcp-remittance data/full   # serve <DIR>/remit over MCP on stdio
+```
+
+**Parsed structurally, not chunked.** A line item means nothing without the header naming the
+payer, so cutting the page into passages of text is simply the wrong tool here. `layout.py`
+turns a PDF into *text runs* — one per string the sender drew, with its position — and
+`parse.py` reads the page as the form it is: a title, a header naming the payer and the payment,
+a table whose columns are found by their headings rather than their order, a total, and
+sometimes a paragraph. The unit read and the unit returned is the whole advice. Every run on the
+page has to land in one of those regions; text the reader has no place for is a refusal, not
+something to read around.
+
+It is strict wherever a mistake could move money or an id. An amount is digits, a point and two
+digits, built into integer minor units from its digits — `1,250.00` is a different sender, not a
+rounding choice. The lines must add up to the stated total, a second statement of the total must
+agree with the first, a running balance must follow from the line above, the currency symbol
+must be the same wherever it appears, and the reference in the header must be the payment the
+file is named for. Each of those failing is `malformed_source`, with the file, page and row.
+
+**What the payer wrote is not reconciled.** A record's `amount` is the total the advice states
+and `detail.lines` are its lines as printed. 29 of the dev slice's developed advices differ from
+the ledger by one to five pence on purpose, and 29 more are short payments whose reason is in
+the paragraph; "correcting" either at parse time would delete the one fact the matcher needs
+the advice for. The paragraph is kept whole in `free_text` and is not mined: an advice from a
+parent company names the subsidiary only there, and its `party` stays unresolved.
+
+Three things the advice does not say, and what the server does about each:
+
+- **Its own id.** An advice prints the payment reference and nothing else, so the record id
+  `remit:RA-2024-0088` is derived from `PAY-2024-0088` — same year, same number — and that rule
+  is tested against every advice ground truth lists.
+- **Its currency, except as a symbol.** `£`, `$`, `€` map to the three currencies this business
+  invoices in.
+- **A sterling amount, if it is foreign.** `base_minor` is then the total at the rate for the
+  advice's own payment date, with that rate and date on the record so the inference is visible.
+  The rate comes from the dataset's own `fx_rates.csv`, not from `ref.fx_rates`: that table is a
+  projection of one dataset's file and holds whichever was loaded last, so an advice from one
+  dataset could be valued at another's rates with nothing to show for it.
+
+One thing it cannot do, found while building it: **the payment reference appears on no bank or
+processor record**, only on the advice. An agent holding a bank line cannot call
+`get_remittance_for_payment` cold, and the date and total it could search by are inside the
+PDFs. Tying a payment to its advice is therefore ingestion's job — load every advice through
+`export_remittances`, then block on date, amount and party — after which the reference is known.
+
+Read-only is drawn as for the bank, and tested the same four ways: an allowlist of advertised
+tools; one `open` in the package, mode `"rb"`, with the PDF library handed bytes in memory and
+never a path (checked on the syntax tree); a locked copy of a dataset left byte for byte and
+timestamp for timestamp as it was, on failing paths too; and a names connection that refuses
+every write.
+
+Which resolver reads the payer name was measured, for the third time. On the slice's 525
+advices `resolve()` gets 508 right, 4 wrong and leaves 13 unresolved; `resolve_description()`
+gets 499 right, **2** wrong and leaves 24. The server uses the second. The two it puts right are
+a lone first word matched at 100 and a typo matched at 89; the two still wrong are, character
+for character, another counterparty's trading name.
+
+#### The held-out layout
+
+The generator draws four remittance layouts, and one — D, 81 of the dev slice's 525 advices — is
+reserved: the parser is developed against the other three and then measured on a page design it
+was not written for. `remit.jsonl`, which records what every advice says and which layout drew
+it, is the answer key; it sits in the same directory as the PDFs, and the server neither lists
+nor opens it (also checked on the syntax tree, and by serving identical answers with that file
+replaced by garbage).
+
+| Layouts | Advices | Exact | Misread | Refused |
+|---|---|---|---|---|
+| Developed (A, B, C) | 444 | **444** | 0 | 0 |
+| Held out (D) | 81 | **0** | **0** | **81** |
+
+"Exact" is every field equal to `remit.jsonl`: payer, reference, date, total, each line's
+reference, amount and note, and the paragraph. **The parse rate on the held-out layout is 0 of
+81.** All 81 are refused at the same place — the page has no row of column headings the reader
+knows — and none is misread, which matters more than the rate: a refusal goes to a person, a
+misread goes into the ledger looking like an answer. The layer underneath carried over intact
+(all 81 PDFs become text runs opening with the right title); what did not generalise is the
+vocabulary of the form. Across the slice, 444 of 525 advices (84.6%) are read, and
+`export_remittances` returns the other 81 by name in `unparsed`, each with its coded error, so
+ingestion can queue them rather than lose them.
+
+How the number was produced, since a held-out number is only as good as the holding out. Every
+development test runs against a temporary dataset that contains only the developed PDFs, so no
+other test *can* open a held-out one. The parser and server were committed first; the
+measurement was then run once and pinned in `tests/test_mcp/remittance/test_held_out.py`
+without the parser being touched. That test fingerprints the two modules that do the reading
+and fails if either changes, because the number would then describe code that no longer exists.
+
+One limit on that, stated plainly: the session that wrote the parser had been told to read the
+generator's `remit_pdf.py`, which draws all four layouts, so its author knew how D differs
+before measuring. No D file was opened and no rule was added that A–C do not exercise — a
+result of nothing parsed is at least consistent with that — but the blind was procedural, not
+perfect. Teaching the parser layout D is an ordinary follow-up; when that happens D stops being
+held out, and this table keeps its 0 / 0 / 81 beside whatever replaces it.
 
 ## Mock processor API
 

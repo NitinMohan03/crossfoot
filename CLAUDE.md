@@ -17,6 +17,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `just proc-api data/full 8099` serves the mock payment processor REST API.
 - `just mcp-processor http://127.0.0.1:8099` serves that API over MCP on stdio. It needs the API
   running and the DB (payer names resolve against the ERP). Token: `CROSSFOOT_PROCESSOR_TOKEN`.
+- `just mcp-remittance data/full` serves the remittance advice PDFs over MCP on stdio. It needs
+  the DB too (payer names). An advice in a layout the parser does not know answers
+  `malformed_source` and is listed in the export's `unparsed`.
 - Eval/cost recipes do not exist yet — added per phase in `reconciliation-agent-plan.md` Part 4.
 
 # Architecture
@@ -35,6 +38,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Workflow
 - IMPORTANT: any change under `src/crossfoot/matching/` or `src/crossfoot/blocking/` requires `just eval-fast` (once it exists) before done.
 - Never edit `tests/fixtures/golden/`. It is ground truth.
+- IMPORTANT: `src/crossfoot/mcp/remittance/` never reads `remit.jsonl` or a layout id. A change to
+  its `layout.py` or `parse.py` fails `tests/test_mcp/remittance/test_held_out.py` on purpose:
+  re-measure the held-out layout, and keep the original 0 / 0 / 81 in the README beside the new
+  number.
 - Show test output as evidence. Don't assert that something passes.
 
 # Budget

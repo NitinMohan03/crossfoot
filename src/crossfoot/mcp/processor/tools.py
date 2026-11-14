@@ -35,6 +35,7 @@ from crossfoot.mcp.common.errors import (
     MALFORMED_SOURCE,
     ToolError,
 )
+from crossfoot.mcp.common.paging import page_limit
 from crossfoot.mcp.common.parties import ErpParties, Parties
 from crossfoot.mcp.erp.tools import parse_date
 from crossfoot.mcp.processor import canonical
@@ -142,17 +143,9 @@ class ProcessorService:
     # -- plumbing ---------------------------------------------------------------------------
 
     def limit(self, limit: int | None) -> int:
-        if limit is None:
-            return self.settings.default_limit
-        if limit < 1:
-            raise ToolError(INVALID_ARGUMENT, f"limit must be at least 1, got {limit}")
-        if limit > self.settings.max_limit:
-            raise ToolError(
-                LIMIT_EXCEEDED,
-                f"limit {limit} is above this server's maximum of {self.settings.max_limit}",
-                max_limit=self.settings.max_limit,
-            )
-        return limit
+        return page_limit(
+            limit, default=self.settings.default_limit, maximum=self.settings.max_limit
+        )
 
     def _resolve(self, payer_name: str) -> PartyRef:
         """Entity resolution, once per distinct name.
